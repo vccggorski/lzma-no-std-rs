@@ -1,7 +1,9 @@
+use crate::allocator::Allocator;
 use crate::decode::util;
 use crate::error;
-use byteorder::{BigEndian, ReadBytesExt};
-use std::io;
+use crate::io_ext::ReadBytesExt;
+use byteorder::BigEndian;
+use core2::io;
 
 pub struct RangeDecoder<'a, R>
 where
@@ -150,19 +152,19 @@ where
     }
 }
 
-// TODO: parametrize by constant and use [u16; 1 << num_bits] as soon as Rust supports this
-#[derive(Clone)]
-pub struct BitTree {
+// TODO: parametrize by constant and use [u16; 1 << num_bits] as soon as Rust
+// supports this
+pub struct BitTree<'a> {
     num_bits: usize,
-    probs: Vec<u16>,
+    probs: &'a mut [u16],
 }
 
-impl BitTree {
-    pub fn new(num_bits: usize) -> Self {
-        BitTree {
+impl<'a> BitTree<'a> {
+    pub fn new<A: Allocator>(mm: &'a A, num_bits: usize) -> Result<Self, A::Error> {
+        Ok(BitTree {
             num_bits,
-            probs: vec![0x400; 1 << num_bits],
-        }
+            probs: mm.allocate(1 << num_bits, || Ok(0x400))?,
+        })
     }
 
     pub fn parse<R: io::BufRead>(
@@ -170,7 +172,7 @@ impl BitTree {
         rangecoder: &mut RangeDecoder<R>,
         update: bool,
     ) -> io::Result<u32> {
-        rangecoder.parse_bit_tree(self.num_bits, self.probs.as_mut_slice(), update)
+        rangecoder.parse_bit_tree(self.num_bits, self.probs, update)
     }
 
     pub fn parse_reverse<R: io::BufRead>(
@@ -178,27 +180,27 @@ impl BitTree {
         rangecoder: &mut RangeDecoder<R>,
         update: bool,
     ) -> io::Result<u32> {
-        rangecoder.parse_reverse_bit_tree(self.num_bits, self.probs.as_mut_slice(), 0, update)
+        rangecoder.parse_reverse_bit_tree(self.num_bits, self.probs, 0, update)
     }
 }
 
-pub struct LenDecoder {
+pub struct LenDecoder<'a> {
     choice: u16,
     choice2: u16,
-    low_coder: Vec<BitTree>,
-    mid_coder: Vec<BitTree>,
-    high_coder: BitTree,
+    low_coder: &'a mut [BitTree<'a>],
+    mid_coder: &'a mut [BitTree<'a>],
+    high_coder: BitTree<'a>,
 }
 
-impl LenDecoder {
-    pub fn new() -> Self {
-        LenDecoder {
+impl<'a> LenDecoder<'a> {
+    pub fn new<A: Allocator>(mm: &'a A) -> Result<Self, A::Error> {
+        Ok(LenDecoder {
             choice: 0x400,
             choice2: 0x400,
-            low_coder: vec![BitTree::new(3); 16],
-            mid_coder: vec![BitTree::new(3); 16],
-            high_coder: BitTree::new(8),
-        }
+            low_coder: mm.allocate(16, || BitTree::new(mm, 3))?,
+            mid_coder: mm.allocate(16, || BitTree::new(mm, 3))?,
+            high_coder: BitTree::new(mm, 8)?,
+        })
     }
 
     pub fn decode<R: io::BufRead>(

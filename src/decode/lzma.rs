@@ -1,9 +1,14 @@
+use crate::allocator::Allocator;
 use crate::decode::lzbuffer;
 use crate::decode::rangecoder;
 use crate::error;
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::io;
-use std::marker::PhantomData;
+use crate::io_ext::ReadBytesExt;
+use byteorder::LittleEndian;
+use core::iter::repeat;
+use core::iter::FromIterator;
+use core::marker::PhantomData;
+use core2::io;
+use heapless::Vec;
 
 use crate::decompress::Options;
 use crate::decompress::UnpackedSize;
@@ -23,9 +28,10 @@ enum ProcessingMode {
     /// Streaming mode. Process the input bytes but assume there will be more
     /// chunks of input data to receive in future calls to `process_mode()`.
     Partial,
-    /// Synchronous mode. Process the input bytes and confirm end of stream has been reached.
-    /// Use this mode if you are processing a fixed buffer of compressed data, or after
-    /// using `Mode::Partial` to check for the end of stream.
+    /// Synchronous mode. Process the input bytes and confirm end of stream has
+    /// been reached. Use this mode if you are processing a fixed buffer of
+    /// compressed data, or after using `Mode::Partial` to check for the end
+    /// of stream.
     Finish,
 }
 
@@ -58,10 +64,9 @@ impl LzmaParams {
 
         let mut pb = props as u32;
         if pb >= 225 {
-            return Err(error::Error::LzmaError(format!(
-                "LZMA header invalid properties: {} must be < 225",
-                pb
-            )));
+            return Err(error::Error::LzmaError(
+                "LZMA header invalid properties: {pb} must be < 225",
+            ));
         }
 
         let lc: u32 = pb % 9;
@@ -119,7 +124,7 @@ impl LzmaParams {
     }
 }
 
-pub struct DecoderState<W, LZB>
+pub struct DecoderState<'a, W, LZB>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
@@ -127,7 +132,7 @@ where
     _phantom: PhantomData<W>,
     // Buffer input data here if we need more for decompression. Up to
     // MAX_REQUIRED_INPUT bytes can be consumed during one iteration.
-    partial_input_buf: std::io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
+    partial_input_buf: io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
     pub output: LZB,
     // most lc significant bits of previous byte are part of the literal context
     pub lc: u32, // 0..8
@@ -135,150 +140,103 @@ where
     // context for literal/match is plaintext offset modulo 2^pb
     pub pb: u32, // 0..4
     unpacked_size: Option<u64>,
-    literal_probs: Vec<Vec<u16>>,
-    pos_slot_decoder: Vec<rangecoder::BitTree>,
-    align_decoder: rangecoder::BitTree,
-    pos_decoders: [u16; 115],
-    is_match: [u16; 192], // true = LZ, false = literal
-    is_rep: [u16; 12],
-    is_rep_g0: [u16; 12],
-    is_rep_g1: [u16; 12],
-    is_rep_g2: [u16; 12],
-    is_rep_0long: [u16; 192],
+    literal_probs: &'a mut [Vec<u16, 0x300>],
+    pos_slot_decoder: &'a mut [rangecoder::BitTree<'a>],
+    align_decoder: rangecoder::BitTree<'a>,
+    pos_decoders: &'a mut [u16],
+    is_match: &'a mut [u16], // true = LZ, false = literal
+    is_rep: &'a mut [u16],
+    is_rep_g0: &'a mut [u16],
+    is_rep_g1: &'a mut [u16],
+    is_rep_g2: &'a mut [u16],
+    is_rep_0long: &'a mut [u16],
     state: usize,
     rep: [usize; 4],
-    len_decoder: rangecoder::LenDecoder,
-    rep_len_decoder: rangecoder::LenDecoder,
-}
-
-// Initialize decoder with accumulating buffer
-pub fn new_accum<W>(
-    output: lzbuffer::LzAccumBuffer<W>,
-    lc: u32,
-    lp: u32,
-    pb: u32,
-    unpacked_size: Option<u64>,
-) -> DecoderState<W, lzbuffer::LzAccumBuffer<W>>
-where
-    W: io::Write,
-{
-    DecoderState {
-        _phantom: PhantomData,
-        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
-        output,
-        lc,
-        lp,
-        pb,
-        unpacked_size,
-        literal_probs: vec![vec![0x400; 0x300]; 1 << (lc + lp)],
-        pos_slot_decoder: vec![rangecoder::BitTree::new(6); 4],
-        align_decoder: rangecoder::BitTree::new(4),
-        pos_decoders: [0x400; 115],
-        is_match: [0x400; 192],
-        is_rep: [0x400; 12],
-        is_rep_g0: [0x400; 12],
-        is_rep_g1: [0x400; 12],
-        is_rep_g2: [0x400; 12],
-        is_rep_0long: [0x400; 192],
-        state: 0,
-        rep: [0; 4],
-        len_decoder: rangecoder::LenDecoder::new(),
-        rep_len_decoder: rangecoder::LenDecoder::new(),
-    }
+    len_decoder: rangecoder::LenDecoder<'a>,
+    rep_len_decoder: rangecoder::LenDecoder<'a>,
 }
 
 // Initialize decoder with circular buffer
-pub fn new_circular<W>(
+pub fn new_circular<'a, A, W>(
+    mm: &'a A,
     output: W,
     params: LzmaParams,
-) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W>>>
+) -> error::Result<DecoderState<'a, W, lzbuffer::LzCircularBuffer<'a, W>>>
 where
+    A: Allocator,
+    error::Error: From<A::Error>,
     W: io::Write,
 {
-    new_circular_with_memlimit(output, params, std::usize::MAX)
+    new_circular_with_memlimit(mm, output, params, usize::MAX)
 }
 
 // Initialize decoder with circular buffer
-pub fn new_circular_with_memlimit<W>(
+pub fn new_circular_with_memlimit<'a, A, W>(
+    mm: &'a A,
     output: W,
     params: LzmaParams,
     memlimit: usize,
-) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W>>>
+) -> error::Result<DecoderState<'a, W, lzbuffer::LzCircularBuffer<'a, W>>>
 where
+    A: Allocator,
+    error::Error: From<A::Error>,
     W: io::Write,
 {
     // Decoder
     let decoder = DecoderState {
         _phantom: PhantomData,
         output: lzbuffer::LzCircularBuffer::from_stream_with_memlimit(
+            mm,
             output,
             params.dict_size as usize,
             memlimit,
-        ),
-        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+        )?,
+        partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
         lc: params.lc,
         lp: params.lp,
         pb: params.pb,
         unpacked_size: params.unpacked_size,
-        literal_probs: vec![vec![0x400; 0x300]; 1 << (params.lc + params.lp)],
-        pos_slot_decoder: vec![rangecoder::BitTree::new(6); 4],
-        align_decoder: rangecoder::BitTree::new(4),
-        pos_decoders: [0x400; 115],
-        is_match: [0x400; 192],
-        is_rep: [0x400; 12],
-        is_rep_g0: [0x400; 12],
-        is_rep_g1: [0x400; 12],
-        is_rep_g2: [0x400; 12],
-        is_rep_0long: [0x400; 192],
+        literal_probs: mm.allocate(1 << (params.lc + params.lp), || {
+            Ok(Vec::from_iter(repeat(0x400).take(0x300)))
+        })?,
+        pos_slot_decoder: mm.allocate(4, || rangecoder::BitTree::new(mm, 6))?,
+        align_decoder: rangecoder::BitTree::new(mm, 4)?,
+        pos_decoders: mm.allocate(115, || Ok(0x400))?,
+        is_match: mm.allocate(192, || Ok(0x400))?,
+        is_rep: mm.allocate(12, || Ok(0x400))?,
+        is_rep_g0: mm.allocate(12, || Ok(0x400))?,
+        is_rep_g1: mm.allocate(12, || Ok(0x400))?,
+        is_rep_g2: mm.allocate(12, || Ok(0x400))?,
+        is_rep_0long: mm.allocate(192, || Ok(0x400))?,
         state: 0,
         rep: [0; 4],
-        len_decoder: rangecoder::LenDecoder::new(),
-        rep_len_decoder: rangecoder::LenDecoder::new(),
+        len_decoder: rangecoder::LenDecoder::new(mm)?,
+        rep_len_decoder: rangecoder::LenDecoder::new(mm)?,
     };
 
     Ok(decoder)
 }
 
-impl<W, LZB> DecoderState<W, LZB>
+impl<'a, W, LZB> DecoderState<'a, W, LZB>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
 {
-    pub fn reset_state(&mut self, lc: u32, lp: u32, pb: u32) {
-        self.lc = lc;
-        self.lp = lp;
-        self.pb = pb;
-        self.literal_probs = vec![vec![0x400; 0x300]; 1 << (lc + lp)];
-        self.pos_slot_decoder = vec![rangecoder::BitTree::new(6); 4];
-        self.align_decoder = rangecoder::BitTree::new(4);
-        self.pos_decoders = [0x400; 115];
-        self.is_match = [0x400; 192];
-        self.is_rep = [0x400; 12];
-        self.is_rep_g0 = [0x400; 12];
-        self.is_rep_g1 = [0x400; 12];
-        self.is_rep_g2 = [0x400; 12];
-        self.is_rep_0long = [0x400; 192];
-        self.state = 0;
-        self.rep = [0; 4];
-        self.len_decoder = rangecoder::LenDecoder::new();
-        self.rep_len_decoder = rangecoder::LenDecoder::new();
-    }
-
     pub fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
         self.unpacked_size = unpacked_size;
     }
 
-    pub fn process<'a, R: io::BufRead>(
+    pub fn process<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<()> {
         self.process_mode(rangecoder, ProcessingMode::Finish)
     }
 
     #[cfg(feature = "stream")]
-    pub fn process_stream<'a, R: io::BufRead>(
+    pub fn process_stream<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<()> {
         self.process_mode(rangecoder, ProcessingMode::Partial)
     }
@@ -289,9 +247,9 @@ where
     ///
     /// Returns `ProcessingStatus` to determine whether one should continue
     /// processing the loop.
-    fn process_next_inner<'a, R: io::BufRead>(
+    fn process_next_inner<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
         update: bool,
     ) -> error::Result<ProcessingStatus> {
         let pos_state = self.output.len() & ((1 << self.pb) - 1);
@@ -388,9 +346,9 @@ where
                     if rangecoder.is_finished_ok()? {
                         return Ok(ProcessingStatus::Finished);
                     }
-                    return Err(error::Error::LzmaError(String::from(
+                    return Err(error::Error::LzmaError(
                         "Found end-of-stream marker but more bytes are available",
-                    )));
+                    ));
                 }
             }
         }
@@ -405,29 +363,29 @@ where
         Ok(ProcessingStatus::Continue)
     }
 
-    fn process_next<'a, R: io::BufRead>(
+    fn process_next<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<ProcessingStatus> {
         self.process_next_inner(rangecoder, true)
     }
 
     /// Try to process the next iteration of the loop.
     ///
-    /// This will check to see if there is enough data to consume and advance the
-    /// decompressor. Needed in streaming mode to avoid corrupting the state while
-    /// processing incomplete chunks of data.
+    /// This will check to see if there is enough data to consume and advance
+    /// the decompressor. Needed in streaming mode to avoid corrupting the
+    /// state while processing incomplete chunks of data.
     fn try_process_next(&mut self, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
-        let mut temp = std::io::Cursor::new(buf);
+        let mut temp = io::Cursor::new(buf);
         let mut rangecoder = rangecoder::RangeDecoder::from_parts(&mut temp, range, code);
         let _ = self.process_next_inner(&mut rangecoder, false)?;
         Ok(())
     }
 
     /// Utility function to read data into the partial input buffer.
-    fn read_partial_input_buf<'a, R: io::BufRead>(
+    fn read_partial_input_buf<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<()> {
         // Fill as much of the tmp buffer as possible
         let start = self.partial_input_buf.position() as usize;
@@ -438,9 +396,9 @@ where
         Ok(())
     }
 
-    fn process_mode<'a, R: io::BufRead>(
+    fn process_mode<'b, R: io::BufRead>(
         &mut self,
-        mut rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        mut rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
         mode: ProcessingMode,
     ) -> error::Result<()> {
         loop {
@@ -519,20 +477,18 @@ where
 
         if let Some(len) = self.unpacked_size {
             if mode == ProcessingMode::Finish && len != self.output.len() as u64 {
-                return Err(error::Error::LzmaError(format!(
-                    "Expected unpacked size of {} but decompressed to {}",
-                    len,
-                    self.output.len()
-                )));
+                return Err(error::Error::LzmaError(
+                    "Expected unpacked size of {len} but decompressed to {self.output.len()}",
+                ));
             }
         }
 
         Ok(())
     }
 
-    fn decode_literal<'a, R: io::BufRead>(
+    fn decode_literal<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
         update: bool,
     ) -> error::Result<u8> {
         let def_prev_byte = 0u8;
@@ -566,9 +522,9 @@ where
         Ok((result - 0x100) as u8)
     }
 
-    fn decode_distance<'a, R: io::BufRead>(
+    fn decode_distance<'b, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
         length: usize,
         update: bool,
     ) -> error::Result<usize> {

@@ -3,7 +3,7 @@ use crate::decode::lzma::{new_circular, new_circular_with_memlimit, DecoderState
 use crate::decode::rangecoder::RangeDecoder;
 use crate::decompress::Options;
 use crate::error::Error;
-use std::fmt::Debug;
+use core::fmt::Debug;
 use std::io::{self, BufRead, Cursor, Read, Write};
 
 /// Minimum header length to be read.
@@ -50,7 +50,7 @@ impl<W> Debug for RunState<W>
 where
     W: Write,
 {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
         fmt.debug_struct("RunState")
             .field("range", &self.range)
             .field("code", &self.code)
@@ -117,7 +117,7 @@ where
             match state {
                 State::Header(output) => {
                     if self.tmp.position() > 0 {
-                        Err(Error::LzmaError("failed to read header".to_string()))
+                        Err(Error::LzmaError("failed to read header"))
                     } else {
                         Ok(output)
                     }
@@ -139,7 +139,7 @@ where
         } else {
             // this will occur if a call to `write()` fails
             Err(Error::LzmaError(
-                "can't finish stream because of previous write error".to_string(),
+                "can't finish stream because of previous write error",
             ))
         }
     }
@@ -206,7 +206,7 @@ impl<W> Debug for Stream<W>
 where
     W: Write + Debug,
 {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
         fmt.debug_struct("Stream")
             .field("tmp", &self.tmp.position())
             .field("state", &self.state)
@@ -338,7 +338,7 @@ where
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, format!("{:?}", error))
+        io::Error::new("{error:?}")
     }
 }
 

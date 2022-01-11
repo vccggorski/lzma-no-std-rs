@@ -12,8 +12,10 @@ exclude = ["tests/*", "benches/*", "fuzz/*", ".github/*", "Cargo.lock"]
 edition = "2018"
 
 [dependencies]
-byteorder = "^1.0.0"
-crc = "^1.0.0"
+byteorder = { version = "^1.0.0", default-features = false }
+crc = { version = "^1.0.0", default-features = false }
+heapless = { version = "^0.7.9" }
+core2 = { path = "../core2", version = "^0.3.2", default-features = false }
 log = { version = "^0.4.14", optional = true }
 env_logger = { version = "^0.8.3", optional = true }
 
@@ -21,8 +23,10 @@ env_logger = { version = "^0.8.3", optional = true }
 rust-lzma = "0.5"
 
 [features]
-enable_logging = ["env_logger", "log"]
-stream = []
+default = ["std"]
+std = ["core2/std"]
+enable_logging = ["std", "env_logger", "log"]
+stream = ["std"]
 
 [package.metadata.docs.rs]
 features = ["stream"]

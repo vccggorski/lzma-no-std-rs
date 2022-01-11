@@ -18,7 +18,7 @@ where
     loop {
         let status = input
             .read_u8()
-            .map_err(|e| error::Error::LzmaError(format!("LZMA2 expected new status: {}", e)))?;
+            .map_err(|e| error::Error::LzmaError("LZMA2 expected new status: {e}"))?;
 
         lzma_info!("LZMA2 status: {}", status);
 
@@ -50,10 +50,7 @@ where
     W: io::Write,
 {
     if status & 0x80 == 0 {
-        return Err(error::Error::LzmaError(format!(
-            "LZMA2 invalid status {}, must be 0, 1, 2 or >= 128",
-            status
-        )));
+        return Err(error::Error::LzmaError("LZMA2 invalid status {status}, must be 0, 1, 2 or >= 128"));
     }
 
     let reset_dict: bool;
@@ -85,12 +82,12 @@ where
 
     let unpacked_size = input
         .read_u16::<BigEndian>()
-        .map_err(|e| error::Error::LzmaError(format!("LZMA2 expected unpacked size: {}", e)))?;
+        .map_err(|e| error::Error::LzmaError("LZMA2 expected unpacked size: {e}"))?;
     let unpacked_size = ((((status & 0x1F) as u64) << 16) | (unpacked_size as u64)) + 1;
 
     let packed_size = input
         .read_u16::<BigEndian>()
-        .map_err(|e| error::Error::LzmaError(format!("LZMA2 expected packed size: {}", e)))?;
+        .map_err(|e| error::Error::LzmaError("LZMA2 expected packed size: {e}"))?;
     let packed_size = (packed_size as u64) + 1;
 
     lzma_info!(
@@ -113,15 +110,12 @@ where
 
         if reset_props {
             let props = input.read_u8().map_err(|e| {
-                error::Error::LzmaError(format!("LZMA2 expected new properties: {}", e))
+                error::Error::LzmaError("LZMA2 expected new properties: {e}")
             })?;
 
             pb = props as u32;
             if pb >= 225 {
-                return Err(error::Error::LzmaError(format!(
-                    "LZMA2 invalid properties: {} must be < 225",
-                    pb
-                )));
+                return Err(error::Error::LzmaError("LZMA2 invalid properties: {pb} must be < 225"));
             }
 
             lc = pb % 9;
@@ -130,10 +124,7 @@ where
             pb /= 5;
 
             if lc + lp > 4 {
-                return Err(error::Error::LzmaError(format!(
-                    "LZMA2 invalid properties: lc + lp ({} + {}) must be <= 4",
-                    lc, lp
-                )));
+                return Err(error::Error::LzmaError("LZMA2 invalid properties: lc + lp ({lc} + {lp}) must be <= 4"));
             }
 
             lzma_info!("Properties {{ lc: {}, lp: {}, pb: {} }}", lc, lp, pb);
@@ -150,7 +141,7 @@ where
 
     let mut taken = input.take(packed_size);
     let mut rangecoder = rangecoder::RangeDecoder::new(&mut taken)
-        .map_err(|e| error::Error::LzmaError(format!("LZMA input too short: {}", e)))?;
+        .map_err(|e| error::Error::LzmaError("LZMA input too short: {e}"))?;
     decoder.process(&mut rangecoder)
 }
 
@@ -165,7 +156,7 @@ where
 {
     let unpacked_size = input
         .read_u16::<BigEndian>()
-        .map_err(|e| error::Error::LzmaError(format!("LZMA2 expected unpacked size: {}", e)))?;
+        .map_err(|e| error::Error::LzmaError("LZMA2 expected unpacked size: {e}"))?;
     let unpacked_size = (unpacked_size as usize) + 1;
 
     lzma_info!(
@@ -180,10 +171,7 @@ where
 
     let mut buf = vec![0; unpacked_size];
     input.read_exact(buf.as_mut_slice()).map_err(|e| {
-        error::Error::LzmaError(format!(
-            "LZMA2 expected {} uncompressed bytes: {}",
-            unpacked_size, e
-        ))
+        error::Error::LzmaError("LZMA2 expected {unpacked_size} uncompressed bytes: {e}")
     })?;
     decoder.output.append_bytes(buf.as_slice());
 

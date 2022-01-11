@@ -22,10 +22,7 @@ impl StreamHeader {
         BR: std::io::BufRead,
     {
         if !util::read_tag(input, XZ_MAGIC)? {
-            return Err(error::Error::XzError(format!(
-                "Invalid XZ magic, expected {:?}",
-                XZ_MAGIC
-            )));
+            return Err(error::Error::XzError("Invalid XZ magic, expected {XZ_MAGIC:?}"));
         }
 
         let (flags, digested) = {
@@ -37,10 +34,7 @@ impl StreamHeader {
 
         let crc32 = input.read_u32::<LittleEndian>()?;
         if crc32 != digested {
-            return Err(error::Error::XzError(format!(
-                "Invalid header CRC32: expected 0x{:08x} but got 0x{:08x}",
-                crc32, digested
-            )));
+            return Err(error::Error::XzError("Invalid header CRC32: expected 0x{crc32:08x} but got 0x{digested:08x}"));
         }
 
         let stream_flags = StreamFlags::parse(flags)?;

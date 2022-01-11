@@ -1,24 +1,18 @@
 //! Pure-Rust codecs for LZMA, LZMA2, and XZ.
 
-#![deny(missing_docs)]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_debug_implementations)]
-#![forbid(unsafe_code)]
 
 #[macro_use]
 mod macros;
 
 mod decode;
-mod encode;
 pub mod error;
-mod xz;
+mod io_ext;
 
+use crate::allocator::Allocator;
 use crate::decode::lzbuffer::LzBuffer;
-use std::io;
-
-/// Compression helpers.
-pub mod compress {
-    pub use crate::encode::options::*;
-}
+pub use core2::io;
 
 /// Decompression helpers.
 pub mod decompress {
@@ -27,77 +21,159 @@ pub mod decompress {
     pub use crate::decode::stream::Stream;
 }
 
-/// Decompress LZMA data with default [`Options`](decompress/struct.Options.html).
-pub fn lzma_decompress<R: io::BufRead, W: io::Write>(
+/// Decompress LZMA data with default
+/// [`Options`](decompress/struct.Options.html).
+pub fn lzma_decompress<A: Allocator, R: io::BufRead, W: io::Write>(
+    mm: &A,
     input: &mut R,
     output: &mut W,
-) -> error::Result<()> {
-    lzma_decompress_with_options(input, output, &decompress::Options::default())
+) -> error::Result<()>
+where
+    error::Error: From<A::Error>,
+{
+    lzma_decompress_with_options(mm, input, output, &decompress::Options::default())
 }
 
 /// Decompress LZMA data with the provided options.
-pub fn lzma_decompress_with_options<R: io::BufRead, W: io::Write>(
+pub fn lzma_decompress_with_options<A: Allocator, R: io::BufRead, W: io::Write>(
+    mm: &A,
     input: &mut R,
     output: &mut W,
     options: &decompress::Options,
-) -> error::Result<()> {
+) -> error::Result<()>
+where
+    error::Error: From<A::Error>,
+{
     let params = decode::lzma::LzmaParams::read_header(input, options)?;
     let mut decoder = if let Some(memlimit) = options.memlimit {
-        decode::lzma::new_circular_with_memlimit(output, params, memlimit)?
+        decode::lzma::new_circular_with_memlimit(mm, output, params, memlimit)?
     } else {
-        decode::lzma::new_circular(output, params)?
+        decode::lzma::new_circular(mm, output, params)?
     };
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
-        .map_err(|e| error::Error::LzmaError(format!("LZMA stream too short: {}", e)))?;
+        .map_err(|e| error::Error::LzmaError("LZMA stream too short: {e}"))?;
     decoder.process(&mut rangecoder)?;
     decoder.output.finish()?;
     Ok(())
 }
 
-/// Compresses data with LZMA and default [`Options`](compress/struct.Options.html).
-pub fn lzma_compress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> io::Result<()> {
-    lzma_compress_with_options(input, output, &compress::Options::default())
-}
+pub mod allocator {
+    use core::cell::RefCell;
 
-/// Compress LZMA data with the provided options.
-pub fn lzma_compress_with_options<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-    options: &compress::Options,
-) -> io::Result<()> {
-    let encoder = encode::dumbencoder::Encoder::from_stream(output, options)?;
-    encoder.process(input)
-}
+    pub unsafe trait Allocator {
+        type Error;
 
-/// Decompress LZMA2 data with default [`Options`](decompress/struct.Options.html).
-pub fn lzma2_decompress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> error::Result<()> {
-    decode::lzma2::decode_stream(input, output)
-}
+        fn allocate<T: Allocatable, F: Fn() -> Result<T, Self::Error>>(
+            &self,
+            count: usize,
+            init: F,
+        ) -> Result<&mut [T], Self::Error>;
 
-/// Compress data with LZMA2 and default [`Options`](compress/struct.Options.html).
-pub fn lzma2_compress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> io::Result<()> {
-    encode::lzma2::encode_stream(input, output)
-}
+        fn allocate_default<T: Allocatable + Default>(
+            &self,
+            count: usize,
+        ) -> Result<&mut [T], Self::Error> {
+            self.allocate(count, || Ok(Default::default()))
+        }
+    }
 
-/// Decompress XZ data with default [`Options`](decompress/struct.Options.html).
-pub fn xz_decompress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> error::Result<()> {
-    decode::xz::decode_stream(input, output)
-}
+    /// This trait prevents users from allocating types that might require
+    /// non-trivial destruction (eg. freeing allocated memory) and should be
+    /// only implemented for types that are either [`Copy`] or field thereof
+    /// points to other [`Allocatable`] type.
+    pub unsafe trait Allocatable {}
+    unsafe impl Allocatable for u8 {}
+    unsafe impl Allocatable for u16 {}
+    unsafe impl<T: Copy, const S: usize> Allocatable for heapless::Vec<T, S> {}
+    unsafe impl<'a> Allocatable for crate::decode::rangecoder::BitTree<'a> {}
 
-/// Compress data with XZ and default [`Options`](compress/struct.Options.html).
-pub fn xz_compress<R: io::BufRead, W: io::Write>(input: &mut R, output: &mut W) -> io::Result<()> {
-    encode::xz::encode_stream(input, output)
+    #[derive(Debug)]
+    pub struct MemoryDispenser<'a> {
+        memory: &'a mut [u8],
+        used: RefCell<usize>,
+    }
+
+    #[derive(Debug)]
+    pub struct OutOfMemory {
+        memory_size: usize,
+        free_memory_left: usize,
+        tried_to_allocate: usize,
+    }
+
+    impl<'a> MemoryDispenser<'a> {
+        pub fn new(slice: &'a mut [u8]) -> Self {
+            Self {
+                memory: slice,
+                used: 0_usize.into(),
+            }
+        }
+    }
+
+    unsafe impl<'a> Allocator for MemoryDispenser<'a> {
+        type Error = OutOfMemory;
+        fn allocate<T: Allocatable, F: Fn() -> Result<T, Self::Error>>(
+            &self,
+            count: usize,
+            init: F,
+        ) -> Result<&mut [T], Self::Error> {
+            let t_size = core::mem::size_of::<T>();
+            let allocate_bytes = t_size * count;
+            let used = *self.used.borrow();
+            if used + allocate_bytes > self.memory.len() {
+                return Err(OutOfMemory {
+                    memory_size: self.memory.len(),
+                    free_memory_left: self.memory.len() - used,
+                    tried_to_allocate: allocate_bytes,
+                });
+            }
+            let output_slice = unsafe {
+                core::slice::from_raw_parts_mut(self.memory.as_ptr().add(used) as *mut T, count)
+            };
+            *self.used.borrow_mut() += allocate_bytes;
+            for v in output_slice.iter_mut() {
+                *v = init()?;
+            }
+            Ok(output_slice)
+        }
+    }
+
+    #[cfg(feature = "std")]
+    use core::any::Any;
+    #[cfg(feature = "std")]
+    use core::convert::Infallible;
+    #[cfg(feature = "std")]
+    use std::vec::Vec;
+
+    #[cfg(feature = "std")]
+    #[derive(Debug, Default)]
+    pub struct StdMemoryDispenser {
+        memory: RefCell<Vec<Vec<u8>>>,
+    }
+
+    #[cfg(feature = "std")]
+    unsafe impl Allocator for StdMemoryDispenser {
+        type Error = Infallible;
+        fn allocate<T: Allocatable, F: Fn() -> Result<T, Self::Error>>(
+            &self,
+            count: usize,
+            init: F,
+        ) -> Result<&mut [T], Self::Error> {
+            use core::convert::TryInto;
+            use core::iter::{repeat_with, FromIterator};
+            let t_size = core::mem::size_of::<T>();
+            let allocate_bytes = t_size * count;
+            self.memory.borrow_mut().push(vec![0_u8; allocate_bytes]);
+            let output_slice = unsafe {
+                core::slice::from_raw_parts_mut(
+                    self.memory.borrow().last().unwrap_unchecked().as_ptr() as *mut T,
+                    count,
+                )
+            };
+            for v in output_slice.iter_mut() {
+                *v = init()?;
+            }
+            Ok(output_slice)
+        }
+    }
 }
