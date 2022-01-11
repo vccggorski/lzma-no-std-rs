@@ -117,7 +117,7 @@ where
             match state {
                 State::Header(output) => {
                     if self.tmp.position() > 0 {
-                        Err(Error::LzmaError("failed to read header".to_string()))
+                        Err(Error::LzmaError("failed to read header"))
                     } else {
                         Ok(output)
                     }
@@ -139,7 +139,7 @@ where
         } else {
             // this will occur if a call to `write()` fails
             Err(Error::LzmaError(
-                "can't finish stream because of previous write error".to_string(),
+                "can't finish stream because of previous write error",
             ))
         }
     }
@@ -338,7 +338,7 @@ where
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, format!("{:?}", error))
+        io::Error::new("{error:?}")
     }
 }
 

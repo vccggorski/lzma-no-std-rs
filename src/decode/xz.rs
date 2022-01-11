@@ -5,8 +5,8 @@ use crate::decode::util;
 use crate::error;
 use crate::xz::{footer, header, CheckMethod, StreamFlags};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use crc::{crc32, crc64, Hasher32};
 use core::hash::Hasher;
+use crc::{crc32, crc64, Hasher32};
 use std::io;
 use std::io::Read;
 
@@ -53,11 +53,9 @@ where
 
         let backward_size = digested.read_u32::<LittleEndian>()?;
         if index_size as u32 != (backward_size + 1) << 2 {
-            return Err(error::Error::XzError(format!(
-                "Invalid index size: expected {} but got {}",
-                (backward_size + 1) << 2,
-                index_size
-            )));
+            return Err(error::Error::XzError(
+                "Invalid index size: expected {(backward_size + 1) << 2} but got {index_size}",
+            ));
         }
 
         let stream_flags = {
@@ -66,31 +64,26 @@ where
         };
 
         if header.stream_flags != stream_flags {
-            return Err(error::Error::XzError(format!(
-                "Flags in header ({:?}) does not match footer ({:?})",
-                header.stream_flags, stream_flags
-            )));
+            return Err(error::Error::XzError("Flags in header ({header.stream_flags:?}) does not match footer ({stream_flags:?})"));
         }
     }
 
     let digest_crc32 = digest.sum32();
     if crc32 != digest_crc32 {
-        return Err(error::Error::XzError(format!(
-            "Invalid footer CRC32: expected 0x{:08x} but got 0x{:08x}",
-            crc32, digest_crc32
-        )));
+        return Err(error::Error::XzError(
+            "Invalid footer CRC32: expected 0x{crc32:08x} but got 0x{digest_crc32:08x}",
+        ));
     }
 
     if !util::read_tag(input, footer::XZ_MAGIC_FOOTER)? {
-        return Err(error::Error::XzError(format!(
-            "Invalid footer magic, expected {:?}",
-            footer::XZ_MAGIC_FOOTER
-        )));
+        return Err(error::Error::XzError(
+            "Invalid footer magic, expected {footer::XZ_MAGIC_FOOTER:?}",
+        ));
     }
 
     if !util::is_eof(input)? {
         return Err(error::Error::XzError(
-            "Unexpected data after last XZ block".to_string(),
+            "Unexpected data after last XZ block",
         ));
     }
     Ok(())
@@ -112,11 +105,9 @@ where
 
         let num_records = get_multibyte(&mut digested)?;
         if num_records != records.len() as u64 {
-            return Err(error::Error::XzError(format!(
-                "Expected {} records but got {} records",
-                num_records,
-                records.len()
-            )));
+            return Err(error::Error::XzError(
+                "Expected {num_records} records but got {records.len()} records"
+            ));
         }
 
         for (i, record) in records.iter().enumerate() {
@@ -124,18 +115,12 @@ where
 
             let unpadded_size = get_multibyte(&mut digested)?;
             if unpadded_size != record.unpadded_size as u64 {
-                return Err(error::Error::XzError(format!(
-                    "Invalid index for record {}: unpadded size ({}) does not match index ({})",
-                    i, record.unpadded_size, unpadded_size
-                )));
+                return Err(error::Error::XzError("Invalid index for record {i}: unpadded size ({record.unpadded_size}) does not match index ({unpadded_size})"));
             }
 
             let unpacked_size = get_multibyte(&mut digested)?;
             if unpacked_size != record.unpacked_size as u64 {
-                return Err(error::Error::XzError(format!(
-                    "Invalid index for record {}: unpacked size ({}) does not match index ({})",
-                    i, record.unpacked_size, unpacked_size
-                )));
+                return Err(error::Error::XzError("Invalid index for record {i}: unpacked size ({record.unpacked_size}) does not match index ({unpacked_size})"));
             }
         }
     }
@@ -155,7 +140,7 @@ where
             let byte = digested.read_u8()?;
             if byte != 0 {
                 return Err(error::Error::XzError(
-                    "Invalid index padding, must be null bytes".to_string(),
+                    "Invalid index padding, must be null bytes",
                 ));
             }
         }
@@ -166,10 +151,9 @@ where
 
     let crc32 = count_input.read_u32::<LittleEndian>()?;
     if crc32 != digest_crc32 {
-        return Err(error::Error::XzError(format!(
-            "Invalid index CRC32: expected 0x{:08x} but got 0x{:08x}",
-            crc32, digest_crc32
-        )));
+        return Err(error::Error::XzError(
+            "Invalid index CRC32: expected 0x{crc32:08x} but got 0x{digest_crc32:08x}",
+        ));
     }
 
     Ok(())
@@ -183,7 +167,7 @@ enum FilterId {
 fn get_filter_id(id: u64) -> error::Result<FilterId> {
     match id {
         0x21 => Ok(FilterId::Lzma2),
-        _ => Err(error::Error::XzError(format!("Unknown filter id {}", id))),
+        _ => Err(error::Error::XzError("Unknown filter id {id}")),
     }
 }
 
@@ -222,10 +206,9 @@ where
     let crc32 = count_input.read_u32::<LittleEndian>()?;
     let digest_crc32 = digest.sum32();
     if crc32 != digest_crc32 {
-        return Err(error::Error::XzError(format!(
-            "Invalid header CRC32: expected 0x{:08x} but got 0x{:08x}",
-            crc32, digest_crc32
-        )));
+        return Err(error::Error::XzError(
+            "Invalid header CRC32: expected 0x{crc32:08x} but got 0x{digest_crc32:08x}",
+        ));
     }
 
     let mut tmpbuf: Vec<u8> = Vec::new();
@@ -236,10 +219,7 @@ where
             let packed_size = decode_filter(count_input, &mut tmpbuf, filter)?;
             if let Some(expected_packed_size) = block_header.packed_size {
                 if (packed_size as u64) != expected_packed_size {
-                    return Err(error::Error::XzError(format!(
-                        "Invalid compressed size: expected {} but got {}",
-                        expected_packed_size, packed_size
-                    )));
+                    return Err(error::Error::XzError("Invalid compressed size: expected {expected_packed_size} but got {packed_size}"));
                 }
             }
         } else {
@@ -259,10 +239,7 @@ where
 
     if let Some(expected_unpacked_size) = block_header.unpacked_size {
         if (unpacked_size as u64) != expected_unpacked_size {
-            return Err(error::Error::XzError(format!(
-                "Invalid decompressed size: expected {} but got {}",
-                expected_unpacked_size, unpacked_size
-            )));
+            return Err(error::Error::XzError("Invalid decompressed size: expected {expected_unpacked_size} but got {unpacked_size}"));
         }
     }
 
@@ -278,7 +255,7 @@ where
         let byte = count_input.read_u8()?;
         if byte != 0 {
             return Err(error::Error::XzError(
-                "Invalid block padding, must be null bytes".to_string(),
+                "Invalid block padding, must be null bytes",
             ));
         }
     }
@@ -311,26 +288,24 @@ where
             let crc32 = input.read_u32::<LittleEndian>()?;
             let digest_crc32 = crc32::checksum_ieee(buf);
             if crc32 != digest_crc32 {
-                return Err(error::Error::XzError(format!(
-                    "Invalid block CRC32, expected 0x{:08x} but got 0x{:08x}",
-                    crc32, digest_crc32
-                )));
+                return Err(error::Error::XzError(
+                    "Invalid block CRC32, expected 0x{crc32:08x} but got 0x{digest_crc32:08x}",
+                ));
             }
         }
         CheckMethod::Crc64 => {
             let crc64 = input.read_u64::<LittleEndian>()?;
             let digest_crc64 = crc64::checksum_ecma(buf);
             if crc64 != digest_crc64 {
-                return Err(error::Error::XzError(format!(
-                    "Invalid block CRC64, expected 0x{:016x} but got 0x{:016x}",
-                    crc64, digest_crc64
-                )));
+                return Err(error::Error::XzError(
+                    "Invalid block CRC64, expected 0x{crc64:016x} but got 0x{digest_crc64:016x}",
+                ));
             }
         }
         // TODO
         CheckMethod::Sha256 => {
             return Err(error::Error::XzError(
-                "Unsupported SHA-256 checksum (not yet implemented)".to_string(),
+                "Unsupported SHA-256 checksum (not yet implemented)",
             ));
         }
     }
@@ -346,10 +321,9 @@ where
     match filter.filter_id {
         FilterId::Lzma2 => {
             if filter.props.len() != 1 {
-                return Err(error::Error::XzError(format!(
-                    "Invalid properties for filter {:?}",
-                    filter.filter_id
-                )));
+                return Err(error::Error::XzError(
+                    "Invalid properties for filter {filter.filter_id:?}",
+                ));
             }
             // TODO: properties??
             lzma2::decode_stream(&mut count_input, output)?;
@@ -378,10 +352,9 @@ where
     );
 
     if reserved != 0 {
-        return Err(error::Error::XzError(format!(
-            "Invalid block flags {}, reserved bits (mask 0x3C) must be zero",
-            flags
-        )));
+        return Err(error::Error::XzError(
+            "Invalid block flags {flags}, reserved bits (mask 0x3C) must be zero"
+        ));
     }
 
     let packed_size = if has_packed_size {
@@ -415,18 +388,14 @@ where
 
         // Early abort to avoid allocating a large vector
         if size_of_properties > header_size {
-            return Err(error::Error::XzError(format!(
-                "Size of filter properties exceeds block header size ({} > {})",
-                size_of_properties, header_size
-            )));
+            return Err(error::Error::XzError("Size of filter properties exceeds block header size ({size_of_properties} > {header_size})"));
         }
 
         let mut buf = vec![0; size_of_properties as usize];
         input.read_exact(buf.as_mut_slice()).map_err(|e| {
-            error::Error::XzError(format!(
-                "Could not read filter properties of size {}: {}",
-                size_of_properties, e
-            ))
+            error::Error::XzError(
+                "Could not read filter properties of size {size_of_properties}: {e}",
+            )
         })?;
 
         lzma_info!("XZ filter properties: {:?}", buf);
@@ -439,7 +408,7 @@ where
 
     if !util::flush_zero_padding(input)? {
         return Err(error::Error::XzError(
-            "Invalid block header padding, must be null bytes".to_string(),
+            "Invalid block header padding, must be null bytes",
         ));
     }
 
@@ -464,6 +433,6 @@ where
     }
 
     Err(error::Error::XzError(
-        "Invalid multi-byte encoding".to_string(),
+        "Invalid multi-byte encoding",
     ))
 }

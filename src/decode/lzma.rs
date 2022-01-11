@@ -58,10 +58,7 @@ impl LzmaParams {
 
         let mut pb = props as u32;
         if pb >= 225 {
-            return Err(error::Error::LzmaError(format!(
-                "LZMA header invalid properties: {} must be < 225",
-                pb
-            )));
+            return Err(error::Error::LzmaError("LZMA header invalid properties: {pb} must be < 225"));
         }
 
         let lc: u32 = pb % 9;
@@ -388,9 +385,9 @@ where
                     if rangecoder.is_finished_ok()? {
                         return Ok(ProcessingStatus::Finished);
                     }
-                    return Err(error::Error::LzmaError(String::from(
+                    return Err(error::Error::LzmaError(
                         "Found end-of-stream marker but more bytes are available",
-                    )));
+                    ));
                 }
             }
         }
@@ -519,11 +516,7 @@ where
 
         if let Some(len) = self.unpacked_size {
             if mode == ProcessingMode::Finish && len != self.output.len() as u64 {
-                return Err(error::Error::LzmaError(format!(
-                    "Expected unpacked size of {} but decompressed to {}",
-                    len,
-                    self.output.len()
-                )));
+                return Err(error::Error::LzmaError("Expected unpacked size of {len} but decompressed to {self.output.len()}"));
             }
         }
 

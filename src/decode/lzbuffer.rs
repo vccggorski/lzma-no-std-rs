@@ -89,10 +89,9 @@ where
     fn last_n(&self, dist: usize) -> error::Result<u8> {
         let buf_len = self.buf.len();
         if dist > buf_len {
-            return Err(error::Error::LzmaError(format!(
-                "Match distance {} is beyond output size {}",
-                dist, buf_len
-            )));
+            return Err(error::Error::LzmaError(
+                "Match distance {dist} is beyond output size {buf_len}",
+            ));
         }
 
         Ok(self.buf[buf_len - dist])
@@ -103,10 +102,9 @@ where
         let new_len = self.len + 1;
 
         if new_len > self.memlimit {
-            Err(error::Error::LzmaError(format!(
-                "exceeded memory limit of {}",
-                self.memlimit
-            )))
+            Err(error::Error::LzmaError(
+                "exceeded memory limit of {self.memlimit}",
+            ))
         } else {
             self.buf.push(lit);
             self.len = new_len;
@@ -119,10 +117,9 @@ where
         lzma_debug!("LZ {{ len: {}, dist: {} }}", len, dist);
         let buf_len = self.buf.len();
         if dist > buf_len {
-            return Err(error::Error::LzmaError(format!(
-                "LZ distance {} is beyond output size {}",
-                dist, buf_len
-            )));
+            return Err(error::Error::LzmaError(
+                "LZ distance {dist} is beyond output size {buf_len}",
+            ));
         }
 
         let mut offset = buf_len - dist;
@@ -198,10 +195,9 @@ where
             if new_len <= self.memlimit {
                 self.buf.resize(new_len, 0);
             } else {
-                return Err(error::Error::LzmaError(format!(
-                    "exceeded memory limit of {}",
-                    self.memlimit
-                )));
+                return Err(error::Error::LzmaError(
+                    "exceeded memory limit of {self.memlimit}",
+                ));
             }
         }
         self.buf[index] = value;
@@ -229,16 +225,14 @@ where
     // Retrieve the n-th last byte
     fn last_n(&self, dist: usize) -> error::Result<u8> {
         if dist > self.dict_size {
-            return Err(error::Error::LzmaError(format!(
-                "Match distance {} is beyond dictionary size {}",
-                dist, self.dict_size
-            )));
+            return Err(error::Error::LzmaError(
+                "Match distance {dist} is beyond dictionary size {self.dict_size}",
+            ));
         }
         if dist > self.len {
-            return Err(error::Error::LzmaError(format!(
-                "Match distance {} is beyond output size {}",
-                dist, self.len
-            )));
+            return Err(error::Error::LzmaError(
+                "Match distance {dist} is beyond output size {self.len}",
+            ));
         }
 
         let offset = (self.dict_size + self.cursor - dist) % self.dict_size;
@@ -264,16 +258,14 @@ where
     fn append_lz(&mut self, len: usize, dist: usize) -> error::Result<()> {
         lzma_debug!("LZ {{ len: {}, dist: {} }}", len, dist);
         if dist > self.dict_size {
-            return Err(error::Error::LzmaError(format!(
-                "LZ distance {} is beyond dictionary size {}",
-                dist, self.dict_size
-            )));
+            return Err(error::Error::LzmaError(
+                "LZ distance {dist} is beyond dictionary size {self.dict_size}",
+            ));
         }
         if dist > self.len {
-            return Err(error::Error::LzmaError(format!(
-                "LZ distance {} is beyond output size {}",
-                dist, self.len
-            )));
+            return Err(error::Error::LzmaError(
+                "LZ distance {dist} is beyond output size {self.len}",
+            ));
         }
 
         let mut offset = (self.dict_size + self.cursor - dist) % self.dict_size;

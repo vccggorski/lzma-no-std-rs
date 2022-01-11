@@ -24,10 +24,7 @@ impl StreamFlags {
         let flags_bytes = input.to_be_bytes();
 
         if flags_bytes[0] != 0x00 {
-            return Err(error::Error::XzError(format!(
-                "Invalid null byte in Stream Flags: {:x}",
-                flags_bytes[0]
-            )));
+            return Err(error::Error::XzError("Invalid null byte in Stream Flags: {flags_bytes[0]:x}"));
         }
 
         let flags = Self {
@@ -66,10 +63,7 @@ impl CheckMethod {
             0x01 => Ok(CheckMethod::Crc32),
             0x04 => Ok(CheckMethod::Crc64),
             0x0A => Ok(CheckMethod::Sha256),
-            _ => Err(error::Error::XzError(format!(
-                "Invalid check method {:x}, expected one of [0x00, 0x01, 0x04, 0x0A]",
-                id
-            ))),
+            _ => Err(error::Error::XzError("Invalid check method {id:x}, expected one of [0x00, 0x01, 0x04, 0x0A]")),
         }
     }
 }
