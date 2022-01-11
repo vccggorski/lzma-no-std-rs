@@ -1,7 +1,8 @@
 use crate::compress::{Options, UnpackedSize};
 use crate::encode::rangecoder;
-use byteorder::{LittleEndian, WriteBytesExt};
-use std::io;
+use crate::io;
+use byteorder::LittleEndian;
+use io::WriteBytesExt;
 
 pub struct Encoder<'a, W>
 where
@@ -22,7 +23,7 @@ where
     W: io::Write,
 {
     pub fn from_stream(stream: &'a mut W, options: &Options) -> io::Result<Self> {
-        let dict_size = 0x0080_0000;
+        let dict_size = 4096;
 
         // Properties
         let props = (LC + 9 * (LP + 5 * PB)) as u8;

@@ -1,3 +1,5 @@
+use crate::option::GuaranteedOption as Option;
+use crate::option::GuaranteedOption::*;
 /// Options to tweak decompression behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Options {
@@ -6,19 +8,10 @@ pub struct Options {
     /// The default is
     /// [`UnpackedSize::ReadFromHeader`](enum.UnpackedSize.html#variant.ReadFromHeader).
     pub unpacked_size: UnpackedSize,
-    /// Defines whether the dictionary's dynamic size should be limited during decompression.
-    ///
-    /// The default is unlimited.
-    pub memlimit: Option<usize>,
-    /// Determines whether to bypass end of stream validation.
-    ///
-    /// This option only applies to the [`Stream`](struct.Stream.html) API.
-    ///
-    /// The default is false (always do completion check).
-    pub allow_incomplete: bool,
 }
 
 /// Alternatives for defining the unpacked size of the decoded data.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UnpackedSize {
     /// Assume that the 8 bytes used to specify the unpacked size are present in the header.
@@ -40,7 +33,23 @@ pub enum UnpackedSize {
 }
 
 impl Default for UnpackedSize {
-    fn default() -> UnpackedSize {
+    fn default() -> Self {
+        Self::default()
+    }
+}
+
+impl Options {
+    /// Const replacement for [`Default::default`]
+    pub const fn default() -> Self {
+        Self {
+            unpacked_size: UnpackedSize::default(),
+        }
+    }
+}
+
+impl UnpackedSize {
+    /// Const replacement for [`Default::default`]
+    pub const fn default() -> Self {
         UnpackedSize::ReadFromHeader
     }
 }
@@ -53,8 +62,6 @@ mod test {
         assert_eq!(
             Options {
                 unpacked_size: UnpackedSize::ReadFromHeader,
-                memlimit: None,
-                allow_incomplete: false,
             },
             Options::default()
         );

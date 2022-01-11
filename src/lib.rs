@@ -1,21 +1,24 @@
-//! Pure-Rust codecs for LZMA, LZMA2, and XZ.
+//! lzma-rs fork containing only no_std based LZMA decoder (standalone function
+//! & stream based)
 
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 #[macro_use]
 mod macros;
 
 mod decode;
+#[cfg(feature = "std")]
 mod encode;
 pub mod error;
-mod xz;
 
-use crate::decode::lzbuffer::LzBuffer;
-use std::io;
+/// Module exposing `io` related traits and impls
+pub mod io;
 
 /// Compression helpers.
+#[cfg(feature = "std")]
 pub mod compress {
     pub use crate::encode::options::*;
 }
@@ -25,37 +28,57 @@ pub mod decompress {
     pub use crate::decode::options::*;
     #[cfg(feature = "stream")]
     pub use crate::decode::stream::Stream;
+    #[cfg(feature = "stream")]
+    pub use crate::decode::stream::StreamStatus;
 }
 
-/// Decompress LZMA data with default [`Options`](decompress/struct.Options.html).
-pub fn lzma_decompress<R: io::BufRead, W: io::Write>(
+/// Decompress LZMA data with default
+/// [`Options`](decompress/struct.Options.html).
+pub fn lzma_decompress<
+    R: io::BufRead,
+    W: io::Write,
+    const DICT_MEM_LIMIT: usize,
+    const PROBS_MEM_LIMIT: usize,
+>(
     input: &mut R,
     output: &mut W,
 ) -> error::Result<()> {
-    lzma_decompress_with_options(input, output, &decompress::Options::default())
+    lzma_decompress_with_options::<_, _, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>(
+        input,
+        output,
+        &decompress::Options::default(),
+    )
 }
 
 /// Decompress LZMA data with the provided options.
-pub fn lzma_decompress_with_options<R: io::BufRead, W: io::Write>(
+pub fn lzma_decompress_with_options<
+    R: io::BufRead,
+    W: io::Write,
+    const DICT_MEM_LIMIT: usize,
+    const PROBS_MEM_LIMIT: usize,
+>(
     input: &mut R,
     output: &mut W,
     options: &decompress::Options,
 ) -> error::Result<()> {
+    use crate::decode::lzbuffer::LzBuffer;
+    use crate::decode::lzbuffer::LzCircularBuffer;
     let params = decode::lzma::LzmaParams::read_header(input, options)?;
-    let mut decoder = if let Some(memlimit) = options.memlimit {
-        decode::lzma::new_circular_with_memlimit(output, params, memlimit)?
-    } else {
-        decode::lzma::new_circular(output, params)?
-    };
+    let mut decoder =
+        decode::lzma::DecoderState::<LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>::new();
+    decoder.reset();
+    decoder.set_params(params)?;
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
-        .map_err(|e| error::Error::LzmaError(format!("LZMA stream too short: {}", e)))?;
-    decoder.process(&mut rangecoder)?;
-    decoder.output.finish()?;
+        .map_err(|_| error::lzma::LzmaError::DataStreamIsTooShort)?;
+    decoder.process(output, &mut rangecoder)?;
+    decoder.output.finish(output)?;
     Ok(())
 }
 
-/// Compresses data with LZMA and default [`Options`](compress/struct.Options.html).
+/// Compresses data with LZMA and default
+/// [`Options`](compress/struct.Options.html). Kept for tests
+#[cfg(feature = "std")]
 pub fn lzma_compress<R: io::BufRead, W: io::Write>(
     input: &mut R,
     output: &mut W,
@@ -64,6 +87,8 @@ pub fn lzma_compress<R: io::BufRead, W: io::Write>(
 }
 
 /// Compress LZMA data with the provided options.
+/// Kept for tests
+#[cfg(feature = "std")]
 pub fn lzma_compress_with_options<R: io::BufRead, W: io::Write>(
     input: &mut R,
     output: &mut W,
@@ -73,31 +98,73 @@ pub fn lzma_compress_with_options<R: io::BufRead, W: io::Write>(
     encoder.process(input)
 }
 
-/// Decompress LZMA2 data with default [`Options`](decompress/struct.Options.html).
-pub fn lzma2_decompress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> error::Result<()> {
-    decode::lzma2::decode_stream(input, output)
-}
+#[allow(missing_docs)]
+/// Module containing alternative [`Option`] type implementation
+pub mod option {
+    /// Custom Option type guaranteed to have a proper variant ordering. This
+    /// allows to achieve guaranteed 0-initializable
+    /// [`crate::decompress::Stream`] with `Option::None` variant being 0
+    #[repr(C)]
+    #[derive(PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+    pub enum GuaranteedOption<T> {
+        /// No value
+        None,
+        /// Some value `T`
+        Some(T),
+    }
 
-/// Compress data with LZMA2 and default [`Options`](compress/struct.Options.html).
-pub fn lzma2_compress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> io::Result<()> {
-    encode::lzma2::encode_stream(input, output)
-}
+    impl<T> GuaranteedOption<T> {
+        pub const fn as_ref(&self) -> GuaranteedOption<&T> {
+            use GuaranteedOption::*;
+            match self {
+                Some(v) => Some(v),
+                None => None,
+            }
+        }
+        pub fn as_mut(&mut self) -> GuaranteedOption<&mut T> {
+            use GuaranteedOption::*;
+            match self {
+                Some(v) => Some(v),
+                None => None,
+            }
+        }
+        pub fn take(&mut self) -> Self {
+            use GuaranteedOption::*;
+            core::mem::replace(self, None)
+        }
+        pub fn replace(&mut self, value: T) -> Self {
+            use GuaranteedOption::*;
+            core::mem::replace(self, Some(value))
+        }
+    }
 
-/// Decompress XZ data with default [`Options`](decompress/struct.Options.html).
-pub fn xz_decompress<R: io::BufRead, W: io::Write>(
-    input: &mut R,
-    output: &mut W,
-) -> error::Result<()> {
-    decode::xz::decode_stream(input, output)
-}
+    impl<T: Clone> Clone for GuaranteedOption<T> {
+        fn clone(&self) -> Self {
+            use GuaranteedOption::*;
+            match self {
+                Some(x) => Some(x.clone()),
+                None => None,
+            }
+        }
+    }
 
-/// Compress data with XZ and default [`Options`](compress/struct.Options.html).
-pub fn xz_compress<R: io::BufRead, W: io::Write>(input: &mut R, output: &mut W) -> io::Result<()> {
-    encode::xz::encode_stream(input, output)
+    impl<T: Copy> Copy for GuaranteedOption<T> {}
+
+    impl<T> From<Option<T>> for GuaranteedOption<T> {
+        fn from(v: Option<T>) -> Self {
+            match v {
+                Some(v) => GuaranteedOption::Some(v),
+                None => GuaranteedOption::None,
+            }
+        }
+    }
+
+    impl<T> From<GuaranteedOption<T>> for Option<T> {
+        fn from(v: GuaranteedOption<T>) -> Self {
+            match v {
+                GuaranteedOption::Some(v) => Some(v),
+                GuaranteedOption::None => None,
+            }
+        }
+    }
 }

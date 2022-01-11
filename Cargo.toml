@@ -6,22 +6,24 @@ license = "MIT"
 authors = ["Guillaume Endignoux <ggendx@gmail.com>"]
 repository = "https://github.com/gendx/lzma-rs"
 readme = "README.md"
-categories = ["compression"]
+categories = ["compression", "no-std"]
 keywords = ["lzma", "compression", "decompression"]
 exclude = ["tests/*", "benches/*", "fuzz/*", ".github/*", "Cargo.lock"]
 edition = "2018"
 
 [dependencies]
-byteorder = "^1.0.0"
-crc = "^1.0.0"
+byteorder = { version = "^1.0.0", default-features = false }
+crc = { version = "^1.0.0", default-features = false }
+core2 = { version = "^0.3.2", default-features = false }
 log = { version = "^0.4.14", optional = true }
-env_logger = { version = "^0.8.3", optional = true }
 
 [dev-dependencies]
 rust-lzma = "0.5"
+env_logger = { version = "^0.8.3" }
 
 [features]
-enable_logging = ["env_logger", "log"]
+default = ["std"]
+std = ["core2/std"]
 stream = []
 
 [package.metadata.docs.rs]

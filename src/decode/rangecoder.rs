@@ -1,8 +1,10 @@
 use crate::decode::util;
 use crate::error;
-use byteorder::{BigEndian, ReadBytesExt};
-use std::io;
+use crate::io;
+use byteorder::BigEndian;
+use io::ReadBytesExt;
 
+// TODO: Replace generic RangeDecoder over `R` into `dyn io::BufRead`?
 pub struct RangeDecoder<'a, R>
 where
     R: 'a + io::BufRead,
@@ -150,27 +152,32 @@ where
     }
 }
 
-// TODO: parametrize by constant and use [u16; 1 << num_bits] as soon as Rust supports this
-#[derive(Clone)]
-pub struct BitTree {
+#[derive(Clone, Copy)]
+pub struct BitTree<const SIZE: usize> {
     num_bits: usize,
-    probs: Vec<u16>,
+    probs: [u16; SIZE],
 }
 
-impl BitTree {
-    pub fn new(num_bits: usize) -> Self {
-        BitTree {
-            num_bits,
-            probs: vec![0x400; 1 << num_bits],
+impl<const SIZE: usize> BitTree<SIZE> {
+    pub const fn new() -> Self {
+        Self {
+            num_bits: 0,
+            probs: [0; SIZE],
         }
     }
-
+    pub fn reset(&mut self) {
+        self.num_bits = match util::exact_log2(SIZE) {
+            Some(v) => v,
+            None => panic!("BitTree<SIZE> where SIZE is not power of 2"),
+        };
+        self.probs.iter_mut().for_each(|v| *v = 0x400);
+    }
     pub fn parse<R: io::BufRead>(
         &mut self,
         rangecoder: &mut RangeDecoder<R>,
         update: bool,
     ) -> io::Result<u32> {
-        rangecoder.parse_bit_tree(self.num_bits, self.probs.as_mut_slice(), update)
+        rangecoder.parse_bit_tree(self.num_bits, &mut self.probs, update)
     }
 
     pub fn parse_reverse<R: io::BufRead>(
@@ -178,29 +185,35 @@ impl BitTree {
         rangecoder: &mut RangeDecoder<R>,
         update: bool,
     ) -> io::Result<u32> {
-        rangecoder.parse_reverse_bit_tree(self.num_bits, self.probs.as_mut_slice(), 0, update)
+        rangecoder.parse_reverse_bit_tree(self.num_bits, &mut self.probs, 0, update)
     }
 }
 
 pub struct LenDecoder {
     choice: u16,
     choice2: u16,
-    low_coder: Vec<BitTree>,
-    mid_coder: Vec<BitTree>,
-    high_coder: BitTree,
+    low_coder: [BitTree<8>; 16],
+    mid_coder: [BitTree<8>; 16],
+    high_coder: BitTree<256>,
 }
 
 impl LenDecoder {
-    pub fn new() -> Self {
-        LenDecoder {
-            choice: 0x400,
-            choice2: 0x400,
-            low_coder: vec![BitTree::new(3); 16],
-            mid_coder: vec![BitTree::new(3); 16],
-            high_coder: BitTree::new(8),
+    pub const fn new() -> Self {
+        Self {
+            choice: 0,
+            choice2: 0,
+            low_coder: [BitTree::new(); 16],
+            mid_coder: [BitTree::new(); 16],
+            high_coder: BitTree::new(),
         }
     }
-
+    pub fn reset(&mut self) {
+            self.choice = 0x400;
+            self.choice2 = 0x400;
+            self.low_coder.iter_mut().for_each(|v| v.reset());
+            self.mid_coder.iter_mut().for_each(|v| v.reset());
+            self.high_coder.reset();
+    }
     pub fn decode<R: io::BufRead>(
         &mut self,
         rangecoder: &mut RangeDecoder<R>,

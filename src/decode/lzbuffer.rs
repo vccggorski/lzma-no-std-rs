@@ -1,187 +1,42 @@
 use crate::error;
-use std::io;
+use crate::io;
+use crate::option::GuaranteedOption as Option;
+use crate::option::GuaranteedOption::*;
 
-pub trait LzBuffer<W>
-where
-    W: io::Write,
-{
+pub trait LzBuffer {
+    fn set_dict_size(&mut self, dict_size: usize) -> error::Result<()>;
     fn len(&self) -> usize;
     // Retrieve the last byte or return a default
     fn last_or(&self, lit: u8) -> u8;
     // Retrieve the n-th last byte
     fn last_n(&self, dist: usize) -> error::Result<u8>;
     // Append a literal
-    fn append_literal(&mut self, lit: u8) -> error::Result<()>;
+    fn append_literal(&mut self, stream: &mut dyn io::Write, lit: u8) -> error::Result<()>;
     // Fetch an LZ sequence (length, distance) from inside the buffer
-    fn append_lz(&mut self, len: usize, dist: usize) -> error::Result<()>;
-    // Get a reference to the output sink
-    fn get_output(&self) -> &W;
-    // Get a mutable reference to the output sink
-    fn get_output_mut(&mut self) -> &mut W;
+    fn append_lz(
+        &mut self,
+        stream: &mut dyn io::Write,
+        len: usize,
+        dist: usize,
+    ) -> error::Result<()>;
     // Consumes this buffer and flushes any data
-    fn finish(self) -> io::Result<W>;
-    // Consumes this buffer without flushing any data
-    fn into_output(self) -> W;
-}
-
-// An accumulating buffer for LZ sequences
-pub struct LzAccumBuffer<W>
-where
-    W: io::Write,
-{
-    stream: W,       // Output sink
-    buf: Vec<u8>,    // Buffer
-    memlimit: usize, // Buffer memory limit
-    len: usize,      // Total number of bytes sent through the buffer
-}
-
-impl<W> LzAccumBuffer<W>
-where
-    W: io::Write,
-{
-    pub fn from_stream(stream: W) -> Self {
-        Self::from_stream_with_memlimit(stream, std::usize::MAX)
-    }
-
-    pub fn from_stream_with_memlimit(stream: W, memlimit: usize) -> Self {
-        Self {
-            stream,
-            buf: Vec::new(),
-            memlimit,
-            len: 0,
-        }
-    }
-
-    // Append bytes
-    pub fn append_bytes(&mut self, buf: &[u8]) {
-        self.buf.extend_from_slice(buf);
-        self.len += buf.len();
-    }
-
-    // Reset the internal dictionary
-    pub fn reset(&mut self) -> io::Result<()> {
-        self.stream.write_all(self.buf.as_slice())?;
-        self.buf.clear();
-        self.len = 0;
-        Ok(())
-    }
-}
-
-impl<W> LzBuffer<W> for LzAccumBuffer<W>
-where
-    W: io::Write,
-{
-    fn len(&self) -> usize {
-        self.len
-    }
-
-    // Retrieve the last byte or return a default
-    fn last_or(&self, lit: u8) -> u8 {
-        let buf_len = self.buf.len();
-        if buf_len == 0 {
-            lit
-        } else {
-            self.buf[buf_len - 1]
-        }
-    }
-
-    // Retrieve the n-th last byte
-    fn last_n(&self, dist: usize) -> error::Result<u8> {
-        let buf_len = self.buf.len();
-        if dist > buf_len {
-            return Err(error::Error::LzmaError(format!(
-                "Match distance {} is beyond output size {}",
-                dist, buf_len
-            )));
-        }
-
-        Ok(self.buf[buf_len - dist])
-    }
-
-    // Append a literal
-    fn append_literal(&mut self, lit: u8) -> error::Result<()> {
-        let new_len = self.len + 1;
-
-        if new_len > self.memlimit {
-            Err(error::Error::LzmaError(format!(
-                "exceeded memory limit of {}",
-                self.memlimit
-            )))
-        } else {
-            self.buf.push(lit);
-            self.len = new_len;
-            Ok(())
-        }
-    }
-
-    // Fetch an LZ sequence (length, distance) from inside the buffer
-    fn append_lz(&mut self, len: usize, dist: usize) -> error::Result<()> {
-        lzma_debug!("LZ {{ len: {}, dist: {} }}", len, dist);
-        let buf_len = self.buf.len();
-        if dist > buf_len {
-            return Err(error::Error::LzmaError(format!(
-                "LZ distance {} is beyond output size {}",
-                dist, buf_len
-            )));
-        }
-
-        let mut offset = buf_len - dist;
-        for _ in 0..len {
-            let x = self.buf[offset];
-            self.buf.push(x);
-            offset += 1;
-        }
-        self.len += len;
-        Ok(())
-    }
-
-    // Get a reference to the output sink
-    fn get_output(&self) -> &W {
-        &self.stream
-    }
-
-    // Get a mutable reference to the output sink
-    fn get_output_mut(&mut self) -> &mut W {
-        &mut self.stream
-    }
-
-    // Consumes this buffer and flushes any data
-    fn finish(mut self) -> io::Result<W> {
-        self.stream.write_all(self.buf.as_slice())?;
-        self.stream.flush()?;
-        Ok(self.stream)
-    }
-
-    // Consumes this buffer without flushing any data
-    fn into_output(self) -> W {
-        self.stream
-    }
+    fn finish(&mut self, stream: &mut dyn io::Write) -> io::Result<()>;
+    fn reset(&mut self);
 }
 
 // A circular buffer for LZ sequences
-pub struct LzCircularBuffer<W>
-where
-    W: io::Write,
-{
-    stream: W,        // Output sink
-    buf: Vec<u8>,     // Circular buffer
-    dict_size: usize, // Length of the buffer
-    memlimit: usize,  // Buffer memory limit
-    cursor: usize,    // Current position
-    len: usize,       // Total number of bytes sent through the buffer
+pub struct LzCircularBuffer<const MEM_LIMIT: usize> {
+    buf: [u8; MEM_LIMIT],     // Circular buffer
+    dict_size: Option<usize>, // Length of the buffer
+    cursor: usize,            // Current position
+    len: usize,               // Total number of bytes sent through the buffer
 }
 
-impl<W> LzCircularBuffer<W>
-where
-    W: io::Write,
-{
-    pub fn from_stream_with_memlimit(stream: W, dict_size: usize, memlimit: usize) -> Self {
-        lzma_info!("Dict size in LZ buffer: {}", dict_size);
+impl<const MEM_LIMIT: usize> LzCircularBuffer<MEM_LIMIT> {
+    pub const fn new() -> Self {
         Self {
-            stream,
-            buf: Vec::new(),
-            dict_size,
-            memlimit,
+            buf: [0_u8; MEM_LIMIT],
+            dict_size: None,
             cursor: 0,
             len: 0,
         }
@@ -191,69 +46,82 @@ where
         *self.buf.get(index).unwrap_or(&0)
     }
 
-    fn set(&mut self, index: usize, value: u8) -> error::Result<()> {
-        let new_len = index + 1;
-
-        if self.buf.len() < new_len {
-            if new_len <= self.memlimit {
-                self.buf.resize(new_len, 0);
-            } else {
-                return Err(error::Error::LzmaError(format!(
-                    "exceeded memory limit of {}",
-                    self.memlimit
-                )));
-            }
-        }
+    fn set(&mut self, index: usize, value: u8) {
         self.buf[index] = value;
-        Ok(())
     }
 }
 
-impl<W> LzBuffer<W> for LzCircularBuffer<W>
-where
-    W: io::Write,
-{
+impl<const MEM_LIMIT: usize> LzBuffer for LzCircularBuffer<MEM_LIMIT> {
+    fn set_dict_size(&mut self, dict_size: usize) -> error::Result<()> {
+        lzma_info!("Dict size in LZ buffer: {}", dict_size);
+        if dict_size > MEM_LIMIT {
+            return Err(error::Error::DictionaryBufferTooSmall {
+                needed: dict_size,
+                available: MEM_LIMIT,
+            });
+        }
+        self.dict_size = Some(dict_size);
+        Ok(())
+    }
+
     fn len(&self) -> usize {
         self.len
     }
 
     // Retrieve the last byte or return a default
     fn last_or(&self, lit: u8) -> u8 {
+        // TODO: resolve optional dict_size in a different way
+        let dict_size = match self.dict_size {
+            Some(v) => v.clone(),
+            None => panic!("LzCircularBuffer::dict_size is not initialized"),
+        };
         if self.len == 0 {
             lit
         } else {
-            self.get((self.dict_size + self.cursor - 1) % self.dict_size)
+            self.get((dict_size + self.cursor - 1) % dict_size)
         }
     }
 
     // Retrieve the n-th last byte
-    fn last_n(&self, dist: usize) -> error::Result<u8> {
-        if dist > self.dict_size {
-            return Err(error::Error::LzmaError(format!(
-                "Match distance {} is beyond dictionary size {}",
-                dist, self.dict_size
-            )));
+    fn last_n(&self, distance: usize) -> error::Result<u8> {
+        let dict_size = match self.dict_size {
+            Some(v) => v.clone(),
+            None => panic!("LzCircularBuffer::dict_size is not initialized"),
+        };
+        if distance > dict_size {
+            return Err(
+                error::lzma::LzmaError::MatchDistanceIsBeyondDictionarySize {
+                    distance,
+                    dict_size,
+                }
+                .into(),
+            );
         }
-        if dist > self.len {
-            return Err(error::Error::LzmaError(format!(
-                "Match distance {} is beyond output size {}",
-                dist, self.len
-            )));
+        if distance > self.len {
+            return Err(error::lzma::LzmaError::MatchDistanceIsBeyondOutputSize {
+                distance,
+                output_len: self.len,
+            }
+            .into());
         }
 
-        let offset = (self.dict_size + self.cursor - dist) % self.dict_size;
+        let offset = (dict_size + self.cursor - distance) % dict_size;
         Ok(self.get(offset))
     }
 
     // Append a literal
-    fn append_literal(&mut self, lit: u8) -> error::Result<()> {
-        self.set(self.cursor, lit)?;
+    fn append_literal(&mut self, stream: &mut dyn io::Write, lit: u8) -> error::Result<()> {
+        let dict_size = match self.dict_size {
+            Some(v) => v.clone(),
+            None => panic!("LzCircularBuffer::dict_size is not initialized"),
+        };
+        self.set(self.cursor, lit);
         self.cursor += 1;
         self.len += 1;
 
         // Flush the circular buffer to the output
-        if self.cursor == self.dict_size {
-            self.stream.write_all(self.buf.as_slice())?;
+        if self.cursor == dict_size {
+            stream.write_all(&self.buf[..self.cursor])?;
             self.cursor = 0;
         }
 
@@ -261,54 +129,58 @@ where
     }
 
     // Fetch an LZ sequence (length, distance) from inside the buffer
-    fn append_lz(&mut self, len: usize, dist: usize) -> error::Result<()> {
-        lzma_debug!("LZ {{ len: {}, dist: {} }}", len, dist);
-        if dist > self.dict_size {
-            return Err(error::Error::LzmaError(format!(
-                "LZ distance {} is beyond dictionary size {}",
-                dist, self.dict_size
-            )));
+    fn append_lz(
+        &mut self,
+        stream: &mut dyn io::Write,
+        len: usize,
+        distance: usize,
+    ) -> error::Result<()> {
+        let dict_size = match self.dict_size {
+            Some(v) => v.clone(),
+            None => panic!("LzCircularBuffer::dict_size is not initialized"),
+        };
+        lzma_debug!("LZ {{ len: {}, distance: {} }}", len, distance);
+        if distance > dict_size {
+            return Err(error::lzma::LzmaError::LzDistanceIsBeyondDictionarySize {
+                distance,
+                dict_size,
+            }
+            .into());
         }
-        if dist > self.len {
-            return Err(error::Error::LzmaError(format!(
-                "LZ distance {} is beyond output size {}",
-                dist, self.len
-            )));
+        if distance > self.len {
+            return Err(error::lzma::LzmaError::LzDistanceIsBeyondOutputSize {
+                distance,
+                output_len: self.len,
+            }
+            .into());
         }
 
-        let mut offset = (self.dict_size + self.cursor - dist) % self.dict_size;
+        let mut offset = (dict_size + self.cursor - distance) % dict_size;
         for _ in 0..len {
             let x = self.get(offset);
-            self.append_literal(x)?;
+            self.append_literal(stream, x)?;
             offset += 1;
-            if offset == self.dict_size {
+            if offset == dict_size {
                 offset = 0
             }
         }
         Ok(())
     }
 
-    // Get a reference to the output sink
-    fn get_output(&self) -> &W {
-        &self.stream
-    }
-
-    // Get a mutable reference to the output sink
-    fn get_output_mut(&mut self) -> &mut W {
-        &mut self.stream
-    }
-
     // Consumes this buffer and flushes any data
-    fn finish(mut self) -> io::Result<W> {
+    fn finish(&mut self, stream: &mut dyn io::Write) -> io::Result<()> {
         if self.cursor > 0 {
-            self.stream.write_all(&self.buf[0..self.cursor])?;
-            self.stream.flush()?;
+            stream.write_all(&self.buf[..self.cursor])?;
+            stream.flush()?;
         }
-        Ok(self.stream)
+        self.reset();
+        Ok(())
     }
 
-    // Consumes this buffer without flushing any data
-    fn into_output(self) -> W {
-        self.stream
+    fn reset(&mut self) {
+        self.buf.iter_mut().for_each(|v| *v = 0);
+        self.dict_size = None;
+        self.cursor = 0;
+        self.len = 0;
     }
 }
