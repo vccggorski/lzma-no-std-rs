@@ -4,6 +4,21 @@ use core::fmt::Display;
 use std::io;
 use core::result;
 
+pub mod lzma {
+    #[derive(Debug)]
+    pub enum LzmaError {
+        MatchDistanceIsBeyondOutputSize { distance: usize, buffer_len: usize },
+        ExceededMemoryLimit { memory_limit: usize },
+    }
+}
+
+pub mod xz {
+    #[derive(Debug)]
+    pub enum XzError {
+        SomeError,
+    }
+}
+
 /// Library errors.
 #[derive(Debug)]
 pub enum Error {
