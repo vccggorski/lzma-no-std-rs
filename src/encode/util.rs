@@ -1,4 +1,4 @@
-use std::hash;
+use core::hash;
 use std::io;
 
 // A Write computing a digest on the bytes written.

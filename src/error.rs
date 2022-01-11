@@ -1,8 +1,8 @@
 //! Error handling.
 
-use std::fmt::Display;
+use core::fmt::Display;
 use std::io;
-use std::result;
+use core::result;
 
 /// Library errors.
 #[derive(Debug)]
@@ -12,9 +12,9 @@ pub enum Error {
     /// Not enough bytes to complete header
     HeaderTooShort(io::Error),
     /// LZMA error.
-    LzmaError(String),
+    LzmaError(&'static str),
     /// XZ error.
-    XzError(String),
+    XzError(&'static str),
 }
 
 /// Library result alias.
@@ -27,16 +27,17 @@ impl From<io::Error> for Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Error::IoError(e) => write!(fmt, "io error: {}", e),
             Error::HeaderTooShort(e) => write!(fmt, "header too short: {}", e),
-            Error::LzmaError(e) => write!(fmt, "lzma error: {}", e),
-            Error::XzError(e) => write!(fmt, "xz error: {}", e),
+            Error::LzmaError(e) => write!(fmt, "lzma error: {:?}", e),
+            Error::XzError(e) => write!(fmt, "xz error: {:?}", e),
         }
     }
 }
 
+#[cfg(not(feature = "no_std"))]
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {

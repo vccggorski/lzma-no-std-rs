@@ -1,5 +1,7 @@
 //! Pure-Rust codecs for LZMA, LZMA2, and XZ.
 
+#![cfg(feature = "no_std")]
+#![no_std]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
 #![forbid(unsafe_code)]

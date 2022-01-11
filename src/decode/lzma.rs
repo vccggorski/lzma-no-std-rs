@@ -3,7 +3,7 @@ use crate::decode::rangecoder;
 use crate::error;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io;
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use crate::decompress::Options;
 use crate::decompress::UnpackedSize;
@@ -195,7 +195,7 @@ pub fn new_circular<W>(
 where
     W: io::Write,
 {
-    new_circular_with_memlimit(output, params, std::usize::MAX)
+    new_circular_with_memlimit(output, params, usize::MAX)
 }
 
 // Initialize decoder with circular buffer

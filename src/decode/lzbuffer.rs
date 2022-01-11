@@ -40,7 +40,7 @@ where
     W: io::Write,
 {
     pub fn from_stream(stream: W) -> Self {
-        Self::from_stream_with_memlimit(stream, std::usize::MAX)
+        Self::from_stream_with_memlimit(stream, usize::MAX)
     }
 
     pub fn from_stream_with_memlimit(stream: W, memlimit: usize) -> Self {

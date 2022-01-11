@@ -1,4 +1,4 @@
-use std::hash;
+use core::hash;
 use std::io;
 
 pub fn read_tag<R: io::BufRead>(input: &mut R, tag: &[u8]) -> io::Result<bool> {

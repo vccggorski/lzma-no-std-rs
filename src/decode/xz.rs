@@ -6,7 +6,7 @@ use crate::error;
 use crate::xz::{footer, header, CheckMethod, StreamFlags};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crc::{crc32, crc64, Hasher32};
-use std::hash::Hasher;
+use core::hash::Hasher;
 use std::io;
 use std::io::Read;
 
