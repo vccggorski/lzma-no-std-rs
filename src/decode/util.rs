@@ -1,5 +1,5 @@
 use core::hash;
-use std::io;
+use core2::io;
 
 pub fn is_eof<R: io::BufRead>(input: &mut R) -> io::Result<bool> {
     let buf = input.fill_buf()?;

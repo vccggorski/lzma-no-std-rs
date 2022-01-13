@@ -1,6 +1,6 @@
-use crate::allocator::{MemoryDispenser, OutOfMemory};
+use crate::allocator::{MemoryDispenser, OutOfMemory, Allocator};
 use crate::error;
-use std::io;
+use core2::io;
 
 pub trait LzBuffer<W>
 where

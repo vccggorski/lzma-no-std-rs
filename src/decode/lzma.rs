@@ -1,13 +1,14 @@
-use crate::allocator::MemoryDispenser;
+use crate::allocator::{MemoryDispenser, Allocator};
 use crate::decode::lzbuffer;
 use crate::decode::rangecoder;
 use crate::error;
-use byteorder::{LittleEndian, ReadBytesExt};
+use crate::io_ext::ReadBytesExt;
+use byteorder::LittleEndian;
 use core::iter::repeat;
 use core::iter::FromIterator;
 use core::marker::PhantomData;
+use core2::io;
 use heapless::Vec;
-use std::io;
 
 use crate::decompress::Options;
 use crate::decompress::UnpackedSize;
@@ -131,7 +132,7 @@ where
     _phantom: PhantomData<W>,
     // Buffer input data here if we need more for decompression. Up to
     // MAX_REQUIRED_INPUT bytes can be consumed during one iteration.
-    partial_input_buf: std::io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
+    partial_input_buf: core2::io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
     pub output: LZB,
     // most lc significant bits of previous byte are part of the literal context
     pub lc: u32, // 0..8
@@ -186,7 +187,7 @@ where
             params.dict_size as usize,
             memlimit,
         )?,
-        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+        partial_input_buf: core2::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
         lc: params.lc,
         lp: params.lp,
         pb: params.pb,
@@ -371,7 +372,7 @@ where
     /// the decompressor. Needed in streaming mode to avoid corrupting the
     /// state while processing incomplete chunks of data.
     fn try_process_next(&mut self, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
-        let mut temp = std::io::Cursor::new(buf);
+        let mut temp = core2::io::Cursor::new(buf);
         let mut rangecoder = rangecoder::RangeDecoder::from_parts(&mut temp, range, code);
         let _ = self.process_next_inner(&mut rangecoder, false)?;
         Ok(())

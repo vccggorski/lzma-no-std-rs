@@ -1,7 +1,7 @@
 //! Error handling.
 
 use core::fmt::Display;
-use std::io;
+use core2::io;
 use core::result;
 use crate::allocator;
 
@@ -57,16 +57,6 @@ impl Display for Error {
             Error::HeaderTooShort(e) => write!(fmt, "header too short: {}", e),
             Error::LzmaError(e) => write!(fmt, "lzma error: {:?}", e),
             Error::XzError(e) => write!(fmt, "xz error: {:?}", e),
-        }
-    }
-}
-
-#[cfg(not(feature = "no_std"))]
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::IoError(e) | Error::HeaderTooShort(e) => Some(e),
-            Error::LzmaError(_) | Error::XzError(_) => None,
         }
     }
 }

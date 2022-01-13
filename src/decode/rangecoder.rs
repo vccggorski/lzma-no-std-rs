@@ -1,8 +1,9 @@
-use crate::allocator::{MemoryDispenser, OutOfMemory};
+use crate::allocator::{MemoryDispenser, OutOfMemory, Allocator};
 use crate::decode::util;
 use crate::error;
-use byteorder::{BigEndian, ReadBytesExt};
-use std::io;
+use crate::io_ext::ReadBytesExt;
+use byteorder::BigEndian;
+use core2::io;
 
 pub struct RangeDecoder<'a, R>
 where

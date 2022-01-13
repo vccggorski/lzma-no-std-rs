@@ -1,6 +1,6 @@
 //! Pure-Rust codecs for LZMA, LZMA2, and XZ.
 
-#![cfg_attr(feature = "no_std", no_std)]
+#![no_std]
 #![deny(missing_debug_implementations)]
 
 #[macro_use]
@@ -8,10 +8,12 @@ mod macros;
 
 mod decode;
 pub mod error;
+mod io_ext;
 
 use crate::allocator::MemoryDispenser;
 use crate::decode::lzbuffer::LzBuffer;
-use std::io;
+pub use core2;
+use core2::io;
 
 /// Decompression helpers.
 pub mod decompress {
@@ -54,6 +56,21 @@ pub fn lzma_decompress_with_options<'a, R: io::BufRead, W: io::Write>(
 pub mod allocator {
     use core::cell::RefCell;
 
+    // TODO: Maybe unsafe
+    pub trait Allocator {
+        type Error;
+
+        fn allocate<T, F: Fn() -> Result<T, Self::Error>>(
+            &self,
+            count: usize,
+            init: F,
+        ) -> Result<&mut [T], Self::Error>;
+
+        fn allocate_default<T: Default>(&self, count: usize) -> Result<&mut [T], Self::Error> {
+            self.allocate(count, || Ok(Default::default()))
+        }
+    }
+
     #[derive(Debug)]
     pub struct MemoryDispenser<'a> {
         memory: &'a mut [u8],
@@ -67,6 +84,7 @@ pub mod allocator {
         tried_to_allocate: usize,
     }
 
+
     impl<'a> MemoryDispenser<'a> {
         pub fn new(slice: &'a mut [u8]) -> Self {
             Self {
@@ -74,8 +92,11 @@ pub mod allocator {
                 used: 0_usize.into(),
             }
         }
+    }
 
-        pub fn allocate<T, F: Fn() -> Result<T, OutOfMemory>>(
+    impl<'a> Allocator for MemoryDispenser<'a> {
+        type Error = OutOfMemory;
+        fn allocate<T, F: Fn() -> Result<T, OutOfMemory>>(
             &self,
             count: usize,
             init: F,
@@ -98,10 +119,6 @@ pub mod allocator {
                 *v = init()?;
             }
             Ok(output_slice)
-        }
-
-        pub fn allocate_default<T: Default>(&self, count: usize) -> Result<&mut [T], OutOfMemory> {
-            self.allocate(count, || Ok(Default::default()))
         }
     }
 }
