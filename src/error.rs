@@ -3,6 +3,7 @@
 use core::fmt::Display;
 use std::io;
 use core::result;
+use crate::allocator;
 
 pub mod lzma {
     #[derive(Debug)]
@@ -22,6 +23,7 @@ pub mod xz {
 /// Library errors.
 #[derive(Debug)]
 pub enum Error {
+    OutOfMemory(allocator::OutOfMemory),
     /// I/O error.
     IoError(io::Error),
     /// Not enough bytes to complete header
@@ -36,14 +38,21 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Error {
+    fn from(e: io::Error) -> Self {
         Error::IoError(e)
+    }
+}
+
+impl From<allocator::OutOfMemory> for Error {
+    fn from(e: allocator::OutOfMemory) -> Self {
+        Error::OutOfMemory(e)
     }
 }
 
 impl Display for Error {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Error::OutOfMemory(e) => write!(fmt, "oom error: {:?}", e),
             Error::IoError(e) => write!(fmt, "io error: {}", e),
             Error::HeaderTooShort(e) => write!(fmt, "header too short: {}", e),
             Error::LzmaError(e) => write!(fmt, "lzma error: {:?}", e),
