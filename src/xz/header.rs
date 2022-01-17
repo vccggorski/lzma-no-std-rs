@@ -20,7 +20,7 @@ impl StreamHeader {
     /// Parse a Stream Header from a buffered reader.
     pub(crate) fn parse<BR>(input: &mut BR) -> error::Result<Self>
     where
-        BR: std::io::BufRead,
+        BR: core2::io::BufRead,
     {
         if !util::read_tag(input, XZ_MAGIC)? {
             return Err(error::Error::XzError("Invalid XZ magic, expected {XZ_MAGIC:?}"));

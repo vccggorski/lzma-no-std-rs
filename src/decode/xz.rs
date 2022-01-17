@@ -8,8 +8,8 @@ use crate::xz::{footer, header, CheckMethod, StreamFlags};
 use byteorder::{BigEndian, LittleEndian};
 use core::hash::Hasher;
 use crc::{crc32, crc64, Hasher32};
-use std::io;
-use std::io::Read;
+use core2::io;
+use core2::io::Read;
 
 #[derive(Debug)]
 struct Record {
@@ -198,7 +198,7 @@ where
 
     let block_header = {
         let mut taken = count_input.take(header_size);
-        let mut digested = io::BufReader::new(util::HasherRead::new(&mut taken, &mut digest));
+        let mut digested = std::io::BufReader::new(util::HasherRead::new(&mut taken, &mut digest));
         read_block_header(&mut digested, header_size)?
     };
 
@@ -224,7 +224,7 @@ where
         } else {
             let mut newbuf: Vec<u8> = Vec::new();
             decode_filter(
-                &mut io::BufReader::new(tmpbuf.as_slice()),
+                &mut std::io::BufReader::new(tmpbuf.as_slice()),
                 &mut newbuf,
                 filter,
             )?;

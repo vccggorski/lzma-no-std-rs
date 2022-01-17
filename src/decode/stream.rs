@@ -4,7 +4,7 @@ use crate::decode::rangecoder::RangeDecoder;
 use crate::decompress::Options;
 use crate::error::Error;
 use core::fmt::Debug;
-use std::io::{self, BufRead, Cursor, Read, Write};
+use core2::io::{self, BufRead, Cursor, Read, Write};
 
 /// Minimum header length to be read.
 /// - props: u8 (1 byte)

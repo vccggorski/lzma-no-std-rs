@@ -1,7 +1,8 @@
 use crate::compress::{Options, UnpackedSize};
 use crate::encode::rangecoder;
-use byteorder::{LittleEndian, WriteBytesExt};
-use std::io;
+use crate::io_ext::WriteBytesExt;
+use byteorder::LittleEndian;
+use core2::io;
 
 pub struct Encoder<'a, W>
 where

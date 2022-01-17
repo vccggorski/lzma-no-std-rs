@@ -1,5 +1,5 @@
-use byteorder::WriteBytesExt;
-use std::io;
+use crate::io_ext::WriteBytesExt;
+use core2::io;
 
 pub struct RangeEncoder<'a, W>
 where

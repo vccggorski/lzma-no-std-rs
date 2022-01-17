@@ -7,6 +7,8 @@
 mod macros;
 
 mod decode;
+#[cfg(feature = "std")]
+mod encode;
 pub mod error;
 mod io_ext;
 #[cfg(feature = "std")]
@@ -15,6 +17,12 @@ mod xz;
 use crate::allocator::Allocator;
 use crate::decode::lzbuffer::LzBuffer;
 pub use core2::io;
+
+#[cfg(feature = "std")]
+/// Compression helpers.
+pub mod compress {
+    pub use crate::encode::options::*;
+}
 
 /// Decompression helpers.
 pub mod decompress {

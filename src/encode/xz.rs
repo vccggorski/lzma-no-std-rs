@@ -1,11 +1,12 @@
 use crate::decode;
 use crate::encode::lzma2;
 use crate::encode::util;
+use crate::io_ext::WriteBytesExt;
 use crate::xz::{footer, header, CheckMethod, StreamFlags};
-use byteorder::{LittleEndian, WriteBytesExt};
+use byteorder::LittleEndian;
+use core2::io;
+use core2::io::Write;
 use crc::{crc32, Hasher32};
-use std::io;
-use std::io::Write;
 
 pub fn encode_stream<R, W>(input: &mut R, output: &mut W) -> io::Result<()>
 where
