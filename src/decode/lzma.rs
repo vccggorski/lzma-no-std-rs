@@ -156,6 +156,49 @@ where
     rep_len_decoder: rangecoder::LenDecoder<'a>,
 }
 
+#[cfg(feature = "std")]
+// Initialize decoder with accumulating buffer
+pub fn new_accum<'a, A, W>(
+    mm: &'a A,
+    output: lzbuffer::LzAccumBuffer<W>,
+    lc: u32,
+    lp: u32,
+    pb: u32,
+    unpacked_size: Option<u64>,
+) -> error::Result<DecoderState<'a, W, lzbuffer::LzAccumBuffer<W>>>
+where
+    A: Allocator,
+    error::Error: From<A::Error>,
+    W: io::Write,
+{
+    let decoder = DecoderState {
+        _phantom: PhantomData,
+        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+        output,
+        lc,
+        lp,
+        pb,
+        unpacked_size,
+        literal_probs: mm.allocate(1 << (lc + lp), || {
+            Ok(Vec::from_iter(repeat(0x400).take(0x300)))
+        })?,
+        pos_slot_decoder: mm.allocate(4, || rangecoder::BitTree::new(mm, 6))?,
+        align_decoder: rangecoder::BitTree::new(mm, 4)?,
+        pos_decoders: mm.allocate(115, || Ok(0x400))?,
+        is_match: mm.allocate(192, || Ok(0x400))?,
+        is_rep: mm.allocate(12, || Ok(0x400))?,
+        is_rep_g0: mm.allocate(12, || Ok(0x400))?,
+        is_rep_g1: mm.allocate(12, || Ok(0x400))?,
+        is_rep_g2: mm.allocate(12, || Ok(0x400))?,
+        is_rep_0long: mm.allocate(192, || Ok(0x400))?,
+        state: 0,
+        rep: [0; 4],
+        len_decoder: rangecoder::LenDecoder::new(mm)?,
+        rep_len_decoder: rangecoder::LenDecoder::new(mm)?,
+    };
+    Ok(decoder)
+}
+
 // Initialize decoder with circular buffer
 pub fn new_circular<'a, A, W>(
     mm: &'a A,
