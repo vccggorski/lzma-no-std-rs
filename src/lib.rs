@@ -68,6 +68,59 @@ where
     Ok(())
 }
 
+#[cfg(feature = "std")]
+/// Compresses data with LZMA and default [`Options`](compress/struct.Options.html).
+pub fn lzma_compress<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+) -> io::Result<()> {
+    lzma_compress_with_options(input, output, &compress::Options::default())
+}
+
+#[cfg(feature = "std")]
+/// Compress LZMA data with the provided options.
+pub fn lzma_compress_with_options<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+    options: &compress::Options,
+) -> io::Result<()> {
+    let encoder = encode::dumbencoder::Encoder::from_stream(output, options)?;
+    encoder.process(input)
+}
+
+#[cfg(feature = "std")]
+/// Decompress LZMA2 data with default [`Options`](decompress/struct.Options.html).
+pub fn lzma2_decompress<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+) -> error::Result<()> {
+    decode::lzma2::decode_stream(input, output)
+}
+
+#[cfg(feature = "std")]
+/// Compress data with LZMA2 and default [`Options`](compress/struct.Options.html).
+pub fn lzma2_compress<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+) -> io::Result<()> {
+    encode::lzma2::encode_stream(input, output)
+}
+
+#[cfg(feature = "std")]
+/// Decompress XZ data with default [`Options`](decompress/struct.Options.html).
+pub fn xz_decompress<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+) -> error::Result<()> {
+    decode::xz::decode_stream(input, output)
+}
+
+#[cfg(feature = "std")]
+/// Compress data with XZ and default [`Options`](compress/struct.Options.html).
+pub fn xz_compress<R: io::BufRead, W: io::Write>(input: &mut R, output: &mut W) -> io::Result<()> {
+    encode::xz::encode_stream(input, output)
+}
+
 pub mod allocator {
     use core::cell::RefCell;
 
