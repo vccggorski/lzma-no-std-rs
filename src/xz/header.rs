@@ -3,7 +3,8 @@
 use crate::decode::util;
 use crate::error;
 use crate::xz::StreamFlags;
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use crate::io_ext::ReadBytesExt;
+use byteorder::{BigEndian, LittleEndian};
 use crc::crc32::{self, Hasher32};
 
 /// File format magic header signature, see sect. 2.1.1.1.

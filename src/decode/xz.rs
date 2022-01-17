@@ -3,8 +3,9 @@
 use crate::decode::lzma2;
 use crate::decode::util;
 use crate::error;
+use crate::io_ext::ReadBytesExt;
 use crate::xz::{footer, header, CheckMethod, StreamFlags};
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use byteorder::{BigEndian, LittleEndian};
 use core::hash::Hasher;
 use crc::{crc32, crc64, Hasher32};
 use std::io;
@@ -82,9 +83,7 @@ where
     }
 
     if !util::is_eof(input)? {
-        return Err(error::Error::XzError(
-            "Unexpected data after last XZ block",
-        ));
+        return Err(error::Error::XzError("Unexpected data after last XZ block"));
     }
     Ok(())
 }
@@ -106,7 +105,7 @@ where
         let num_records = get_multibyte(&mut digested)?;
         if num_records != records.len() as u64 {
             return Err(error::Error::XzError(
-                "Expected {num_records} records but got {records.len()} records"
+                "Expected {num_records} records but got {records.len()} records",
             ));
         }
 
@@ -353,7 +352,7 @@ where
 
     if reserved != 0 {
         return Err(error::Error::XzError(
-            "Invalid block flags {flags}, reserved bits (mask 0x3C) must be zero"
+            "Invalid block flags {flags}, reserved bits (mask 0x3C) must be zero",
         ));
     }
 
@@ -432,7 +431,5 @@ where
         }
     }
 
-    Err(error::Error::XzError(
-        "Invalid multi-byte encoding",
-    ))
+    Err(error::Error::XzError("Invalid multi-byte encoding"))
 }

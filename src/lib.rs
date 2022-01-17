@@ -9,6 +9,8 @@ mod macros;
 mod decode;
 pub mod error;
 mod io_ext;
+#[cfg(feature = "std")]
+mod xz;
 
 use crate::allocator::Allocator;
 use crate::decode::lzbuffer::LzBuffer;
@@ -193,12 +195,8 @@ pub mod allocator {
             for v in self.memory.borrow_mut().iter_mut() {
                 if v.as_ptr() as *const T == old.as_ptr() {
                     v.resize(allocate_bytes, Default::default());
-                    let output_slice = unsafe {
-                        core::slice::from_raw_parts_mut(
-                            v.as_ptr() as *mut T,
-                            count,
-                        )
-                    };
+                    let output_slice =
+                        unsafe { core::slice::from_raw_parts_mut(v.as_ptr() as *mut T, count) };
                     for v in output_slice.iter_mut() {
                         *v = unsafe { init().unwrap_unchecked() };
                     }

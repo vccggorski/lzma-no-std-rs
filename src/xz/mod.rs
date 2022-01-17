@@ -5,7 +5,7 @@
 //! [spec]: https://tukaani.org/xz/xz-file-format.txt
 
 use crate::error;
-use std::io;
+use core2::io;
 
 pub(crate) mod footer;
 pub(crate) mod header;

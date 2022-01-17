@@ -1,6 +1,13 @@
 use core::hash;
 use core2::io;
 
+#[cfg(feature = "std")]
+pub fn read_tag<R: io::BufRead>(input: &mut R, tag: &[u8]) -> io::Result<bool> {
+    let mut buf = vec![0; tag.len()];
+    input.read_exact(buf.as_mut_slice())?;
+    Ok(buf.as_slice() == tag)
+}
+
 pub fn is_eof<R: io::BufRead>(input: &mut R) -> io::Result<bool> {
     let buf = input.fill_buf()?;
     Ok(buf.is_empty())
