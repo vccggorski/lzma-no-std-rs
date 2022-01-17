@@ -1,3 +1,7 @@
+// TODO: Fix tests
+// TODO: Add tests for allocator
+// TODO: Improve API for no-std
+// TODO: Add proper enums for errors in place of text constants
 //! Pure-Rust codecs for LZMA, LZMA2, and XZ.
 
 #![cfg_attr(not(feature = "std"), no_std)]
