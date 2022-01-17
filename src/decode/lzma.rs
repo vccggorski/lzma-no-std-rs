@@ -265,6 +265,40 @@ where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
 {
+    #[cfg(feature = "std")]
+    pub fn reset_state<A: Allocator>(
+        &mut self,
+        mm: &'a A,
+        lc: u32,
+        lp: u32,
+        pb: u32,
+    ) -> Result<(), A::Error> {
+        self.lc = lc;
+        self.lp = lp;
+        self.pb = pb;
+        self.literal_probs = mm.reallocate(self.literal_probs, 1 << (lc + lp), || {
+            Ok(Vec::from_iter(repeat(0x400).take(0x300)))
+        })?;
+        self.pos_decoders.iter_mut().for_each(|v| *v = 0x400);
+        self.is_match.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_g0.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_g1.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_g2.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_0long.iter_mut().for_each(|v| *v = 0x400);
+        self.state = 0;
+        self.rep = [0; 4];
+        unsafe {
+            self.pos_slot_decoder
+                .iter_mut()
+                .for_each(|v| *v = rangecoder::BitTree::new(mm, 6).unwrap_unchecked());
+            self.align_decoder = rangecoder::BitTree::new(mm, 4).unwrap_unchecked();
+            self.len_decoder = rangecoder::LenDecoder::new(mm).unwrap_unchecked();
+            self.rep_len_decoder = rangecoder::LenDecoder::new(mm).unwrap_unchecked();
+        }
+        Ok(())
+    }
+
     pub fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
         self.unpacked_size = unpacked_size;
     }

@@ -76,6 +76,15 @@ pub mod allocator {
         ) -> Result<&mut [T], Self::Error> {
             self.allocate(count, || Ok(Default::default()))
         }
+
+        fn reallocate<T: Allocatable, F: Fn() -> Result<T, Self::Error>>(
+            &self,
+            old: &mut [T],
+            count: usize,
+            init: F,
+        ) -> Result<&mut [T], Self::Error> {
+            unimplemented!();
+        }
     }
 
     /// This trait prevents users from allocating types that might require
@@ -139,8 +148,6 @@ pub mod allocator {
     }
 
     #[cfg(feature = "std")]
-    use core::any::Any;
-    #[cfg(feature = "std")]
     use core::convert::Infallible;
     #[cfg(feature = "std")]
     use std::vec::Vec;
@@ -171,9 +178,34 @@ pub mod allocator {
                 )
             };
             for v in output_slice.iter_mut() {
-                *v = init()?;
+                *v = unsafe { init().unwrap_unchecked() };
             }
             Ok(output_slice)
+        }
+        fn reallocate<T: Allocatable, F: Fn() -> Result<T, Self::Error>>(
+            &self,
+            old: &mut [T],
+            count: usize,
+            init: F,
+        ) -> Result<&mut [T], Self::Error> {
+            let t_size = core::mem::size_of::<T>();
+            let allocate_bytes = t_size * count;
+            for v in self.memory.borrow_mut().iter_mut() {
+                if v.as_ptr() as *const T == old.as_ptr() {
+                    v.resize(allocate_bytes, Default::default());
+                    let output_slice = unsafe {
+                        core::slice::from_raw_parts_mut(
+                            v.as_ptr() as *mut T,
+                            count,
+                        )
+                    };
+                    for v in output_slice.iter_mut() {
+                        *v = unsafe { init().unwrap_unchecked() };
+                    }
+                    return Ok(output_slice);
+                }
+            }
+            panic!("Slice was not allocated using the Allocator!");
         }
     }
 }

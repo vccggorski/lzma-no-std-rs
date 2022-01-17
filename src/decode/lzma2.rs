@@ -1,11 +1,13 @@
+use crate::allocator::Allocator;
 use crate::decode::lzbuffer;
 use crate::decode::lzbuffer::LzBuffer;
 use crate::decode::lzma;
 use crate::decode::rangecoder;
 use crate::error;
-use byteorder::{BigEndian, ReadBytesExt};
-use std::io;
-use std::io::Read;
+use crate::io_ext::ReadBytesExt;
+use byteorder::BigEndian;
+use core2::io;
+use core2::io::Read;
 
 pub fn decode_stream<R, W>(input: &mut R, output: &mut W) -> error::Result<()>
 where
@@ -13,7 +15,8 @@ where
     W: io::Write,
 {
     let accum = lzbuffer::LzAccumBuffer::from_stream(output);
-    let mut decoder = lzma::new_accum(accum, 0, 0, 0, None);
+    let mm = crate::allocator::StdMemoryDispenser::default();
+    let mut decoder = lzma::new_accum(&mm, accum, 0, 0, 0, None).unwrap();
 
     loop {
         let status = input
@@ -32,7 +35,7 @@ where
             // uncompressed no reset
             parse_uncompressed(&mut decoder, input, false)?;
         } else {
-            parse_lzma(&mut decoder, input, status)?;
+            parse_lzma(&mut decoder, &mm, input, status)?;
         }
     }
 
@@ -40,17 +43,22 @@ where
     Ok(())
 }
 
-fn parse_lzma<R, W>(
-    decoder: &mut lzma::DecoderState<W, lzbuffer::LzAccumBuffer<W>>,
+fn parse_lzma<'a, 'b, A, R, W>(
+    decoder: &'a mut lzma::DecoderState<'b, W, lzbuffer::LzAccumBuffer<W>>,
+    mm: &'b A,
     input: &mut R,
     status: u8,
 ) -> error::Result<()>
 where
+    A: Allocator,
+    error::Error: From<A::Error>,
     R: io::BufRead,
     W: io::Write,
 {
     if status & 0x80 == 0 {
-        return Err(error::Error::LzmaError("LZMA2 invalid status {status}, must be 0, 1, 2 or >= 128"));
+        return Err(error::Error::LzmaError(
+            "LZMA2 invalid status {status}, must be 0, 1, 2 or >= 128",
+        ));
     }
 
     let reset_dict: bool;
@@ -109,13 +117,15 @@ where
         let mut pb: u32;
 
         if reset_props {
-            let props = input.read_u8().map_err(|e| {
-                error::Error::LzmaError("LZMA2 expected new properties: {e}")
-            })?;
+            let props = input
+                .read_u8()
+                .map_err(|e| error::Error::LzmaError("LZMA2 expected new properties: {e}"))?;
 
             pb = props as u32;
             if pb >= 225 {
-                return Err(error::Error::LzmaError("LZMA2 invalid properties: {pb} must be < 225"));
+                return Err(error::Error::LzmaError(
+                    "LZMA2 invalid properties: {pb} must be < 225",
+                ));
             }
 
             lc = pb % 9;
@@ -124,7 +134,9 @@ where
             pb /= 5;
 
             if lc + lp > 4 {
-                return Err(error::Error::LzmaError("LZMA2 invalid properties: lc + lp ({lc} + {lp}) must be <= 4"));
+                return Err(error::Error::LzmaError(
+                    "LZMA2 invalid properties: lc + lp ({lc} + {lp}) must be <= 4",
+                ));
             }
 
             lzma_info!("Properties {{ lc: {}, lp: {}, pb: {} }}", lc, lp, pb);
@@ -134,7 +146,7 @@ where
             pb = decoder.pb;
         }
 
-        decoder.reset_state(lc, lp, pb);
+        decoder.reset_state(mm, lc, lp, pb)?;
     }
 
     decoder.set_unpacked_size(Some(unpacked_size + decoder.output.len() as u64));
