@@ -58,6 +58,7 @@ pub fn lzma_decompress_with_options<A: Allocator, R: io::BufRead, W: io::Write>(
 where
     error::Error: From<A::Error>,
 {
+    use crate::decode::lzma::AbstractDecoderState;
     let params = decode::lzma::LzmaParams::read_header(input, options)?;
     let mut decoder = if let Some(memlimit) = options.memlimit {
         decode::lzma::new_circular_with_memlimit(mm, output, params, memlimit)?

@@ -2,6 +2,7 @@ use crate::allocator::Allocator;
 use crate::decode::lzbuffer;
 use crate::decode::lzbuffer::LzBuffer;
 use crate::decode::lzma;
+use crate::decode::lzma::AbstractDecoderState;
 use crate::decode::rangecoder;
 use crate::error;
 use crate::io_ext::ReadBytesExt;
@@ -53,7 +54,7 @@ where
     A: Allocator,
     error::Error: From<A::Error>,
     R: io::BufRead,
-    W: io::Write,
+    W: io::Write + 'b,
 {
     if status & 0x80 == 0 {
         return Err(error::Error::LzmaError(

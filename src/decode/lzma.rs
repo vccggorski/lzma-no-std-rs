@@ -24,7 +24,7 @@ const MAX_REQUIRED_INPUT: usize = 20;
 /// Tells the decompressor if we should expect more data after parsing the
 /// current input.
 #[derive(Debug, PartialEq)]
-enum ProcessingMode {
+pub(crate) enum ProcessingMode {
     /// Streaming mode. Process the input bytes but assume there will be more
     /// chunks of input data to receive in future calls to `process_mode()`.
     Partial,
@@ -39,7 +39,7 @@ enum ProcessingMode {
 ///
 /// Indicates whether processing should continue or is finished.
 #[derive(Debug, PartialEq)]
-enum ProcessingStatus {
+pub(crate) enum ProcessingStatus {
     Continue,
     Finished,
 }
@@ -121,6 +121,73 @@ impl LzmaParams {
         };
 
         Ok(params)
+    }
+}
+
+impl<'a, W, LZB> AbstractDecoderState<'a, W, LZB> for DecoderState<'a, W, LZB>
+where
+    W: io::Write,
+    LZB: lzbuffer::LzBuffer<W> + 'a,
+{
+    fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
+        &mut self.partial_input_buf
+    }
+    fn output(&mut self) -> &mut LZB {
+        &mut self.output
+    }
+    fn lc(&self) -> u32 {
+        self.lc
+    }
+    fn lp(&self) -> u32 {
+        self.lp
+    }
+    fn pb(&self) -> u32 {
+        self.pb
+    }
+    fn unpacked_size(&mut self) -> &mut Option<u64> {
+        &mut self.unpacked_size
+    }
+    fn literal_probs(&mut self) -> &mut [Vec<u16, 0x300>] {
+        &mut self.literal_probs
+    }
+    fn pos_slot_decoder(&mut self) -> &mut [rangecoder::BitTree<'a>] {
+        &mut self.pos_slot_decoder
+    }
+    fn align_decoder(&mut self) -> &mut rangecoder::BitTree<'a> {
+        &mut self.align_decoder
+    }
+    fn pos_decoders(&mut self) -> &mut [u16] {
+        &mut self.pos_decoders
+    }
+    fn is_match(&mut self) -> &mut [u16] {
+        &mut self.is_match
+    }
+    fn is_rep(&mut self) -> &mut [u16] {
+        &mut self.is_rep
+    }
+    fn is_rep_g0(&mut self) -> &mut [u16] {
+        &mut self.is_rep_g0
+    }
+    fn is_rep_g1(&mut self) -> &mut [u16] {
+        &mut self.is_rep_g1
+    }
+    fn is_rep_g2(&mut self) -> &mut [u16] {
+        &mut self.is_rep_g2
+    }
+    fn is_rep_0long(&mut self) -> &mut [u16] {
+        &mut self.is_rep_0long
+    }
+    fn state(&mut self) -> &mut usize {
+        &mut self.state
+    }
+    fn rep(&mut self) -> &mut [usize] {
+        &mut self.rep
+    }
+    fn len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a> {
+        &mut self.len_decoder
+    }
+    fn rep_len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a> {
+        &mut self.rep_len_decoder
     }
 }
 
@@ -298,12 +365,39 @@ where
         }
         Ok(())
     }
+}
 
-    pub fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
-        self.unpacked_size = unpacked_size;
+pub(crate) trait AbstractDecoderState<'a, W, LZB>
+where
+    W: io::Write,
+    LZB: lzbuffer::LzBuffer<W> + 'a,
+{
+    fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]>;
+    fn output(&mut self) -> &mut LZB;
+    fn lc(&self) -> u32;
+    fn lp(&self) -> u32;
+    fn pb(&self) -> u32;
+    fn unpacked_size(&mut self) -> &mut Option<u64>;
+    fn literal_probs(&mut self) -> &mut [Vec<u16, 0x300>];
+    fn pos_slot_decoder(&mut self) -> &mut [rangecoder::BitTree<'a>];
+    fn align_decoder(&mut self) -> &mut rangecoder::BitTree<'a>;
+    fn pos_decoders(&mut self) -> &mut [u16];
+    fn is_match(&mut self) -> &mut [u16];
+    fn is_rep(&mut self) -> &mut [u16];
+    fn is_rep_g0(&mut self) -> &mut [u16];
+    fn is_rep_g1(&mut self) -> &mut [u16];
+    fn is_rep_g2(&mut self) -> &mut [u16];
+    fn is_rep_0long(&mut self) -> &mut [u16];
+    fn state(&mut self) -> &mut usize;
+    fn rep(&mut self) -> &mut [usize];
+    fn len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a>;
+    fn rep_len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a>;
+
+    fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
+        *self.unpacked_size() = unpacked_size;
     }
 
-    pub fn process<'b, R: io::BufRead>(
+    fn process<'b, R: io::BufRead>(
         &mut self,
         rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<()> {
@@ -311,7 +405,7 @@ where
     }
 
     #[cfg(feature = "stream")]
-    pub fn process_stream<'b, R: io::BufRead>(
+    fn process_stream<'b, R: io::BufRead>(
         &mut self,
         rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<()> {
@@ -329,26 +423,27 @@ where
         rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
         update: bool,
     ) -> error::Result<ProcessingStatus> {
-        let pos_state = self.output.len() & ((1 << self.pb) - 1);
+        let pos_state = self.output().len() & ((1 << self.pb()) - 1);
 
         // Literal
+        let state = *self.state();
         if !rangecoder.decode_bit(
             // TODO: assumes pb = 2 ??
-            &mut self.is_match[(self.state << 4) + pos_state],
+            &mut self.is_match()[(state << 4) + pos_state],
             update,
         )? {
             let byte: u8 = self.decode_literal(rangecoder, update)?;
 
             if update {
                 lzma_debug!("Literal: {}", byte);
-                self.output.append_literal(byte)?;
+                self.output().append_literal(byte)?;
 
-                self.state = if self.state < 4 {
+                *self.state() = if *self.state() < 4 {
                     0
-                } else if self.state < 10 {
-                    self.state - 3
+                } else if *self.state() < 10 {
+                    *self.state() - 3
                 } else {
-                    self.state - 6
+                    *self.state() - 6
                 };
             }
             return Ok(ProcessingStatus::Continue);
@@ -356,70 +451,73 @@ where
 
         // LZ
         let mut len: usize;
+        let state = *self.state();
         // Distance is repeated from LRU
-        if rangecoder.decode_bit(&mut self.is_rep[self.state], update)? {
+        if rangecoder.decode_bit(&mut self.is_rep()[state], update)? {
             // dist = rep[0]
-            if !rangecoder.decode_bit(&mut self.is_rep_g0[self.state], update)? {
+            if !rangecoder.decode_bit(&mut self.is_rep_g0()[state], update)? {
                 // len = 1
-                if !rangecoder.decode_bit(
-                    &mut self.is_rep_0long[(self.state << 4) + pos_state],
-                    update,
-                )? {
+                if !rangecoder
+                    .decode_bit(&mut self.is_rep_0long()[(state << 4) + pos_state], update)?
+                {
                     // update state (short rep)
                     if update {
-                        self.state = if self.state < 7 { 9 } else { 11 };
-                        let dist = self.rep[0] + 1;
-                        self.output.append_lz(1, dist)?;
+                        *self.state() = if state < 7 { 9 } else { 11 };
+                        let dist = self.rep()[0] + 1;
+                        self.output().append_lz(1, dist)?;
                     }
                     return Ok(ProcessingStatus::Continue);
                 }
             // dist = rep[i]
             } else {
                 let idx: usize;
-                if !rangecoder.decode_bit(&mut self.is_rep_g1[self.state], update)? {
+                let state = *self.state();
+                if !rangecoder.decode_bit(&mut self.is_rep_g1()[state], update)? {
                     idx = 1;
-                } else if !rangecoder.decode_bit(&mut self.is_rep_g2[self.state], update)? {
+                } else if !rangecoder.decode_bit(&mut self.is_rep_g2()[state], update)? {
                     idx = 2;
                 } else {
                     idx = 3;
                 }
                 if update {
                     // Update LRU
-                    let dist = self.rep[idx];
+                    let dist = self.rep()[idx];
                     for i in (0..idx).rev() {
-                        self.rep[i + 1] = self.rep[i];
+                        self.rep()[i + 1] = self.rep()[i];
                     }
-                    self.rep[0] = dist
+                    self.rep()[0] = dist
                 }
             }
 
-            len = self.rep_len_decoder.decode(rangecoder, pos_state, update)?;
+            len = self
+                .rep_len_decoder()
+                .decode(rangecoder, pos_state, update)?;
 
             if update {
                 // update state (rep)
-                self.state = if self.state < 7 { 8 } else { 11 };
+                *self.state() = if *self.state() < 7 { 8 } else { 11 };
             }
         // New distance
         } else {
             if update {
                 // Update LRU
-                self.rep[3] = self.rep[2];
-                self.rep[2] = self.rep[1];
-                self.rep[1] = self.rep[0];
+                self.rep()[3] = self.rep()[2];
+                self.rep()[2] = self.rep()[1];
+                self.rep()[1] = self.rep()[0];
             }
 
-            len = self.len_decoder.decode(rangecoder, pos_state, update)?;
+            len = self.len_decoder().decode(rangecoder, pos_state, update)?;
 
             if update {
                 // update state (match)
-                self.state = if self.state < 7 { 7 } else { 10 };
+                *self.state() = if *self.state() < 7 { 7 } else { 10 };
             }
 
             let rep_0 = self.decode_distance(rangecoder, len, update)?;
 
             if update {
-                self.rep[0] = rep_0;
-                if self.rep[0] == 0xFFFF_FFFF {
+                self.rep()[0] = rep_0;
+                if self.rep()[0] == 0xFFFF_FFFF {
                     if rangecoder.is_finished_ok()? {
                         return Ok(ProcessingStatus::Finished);
                     }
@@ -433,8 +531,8 @@ where
         if update {
             len += 2;
 
-            let dist = self.rep[0] + 1;
-            self.output.append_lz(len, dist)?;
+            let dist = self.rep()[0] + 1;
+            self.output().append_lz(len, dist)?;
         }
 
         Ok(ProcessingStatus::Continue)
@@ -465,11 +563,11 @@ where
         rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
     ) -> error::Result<()> {
         // Fill as much of the tmp buffer as possible
-        let start = self.partial_input_buf.position() as usize;
+        let start = self.partial_input_buf().position() as usize;
         let bytes_read =
-            rangecoder.read_into(&mut self.partial_input_buf.get_mut()[start..])? as u64;
-        self.partial_input_buf
-            .set_position(self.partial_input_buf.position() + bytes_read);
+            rangecoder.read_into(&mut self.partial_input_buf().get_mut()[start..])? as u64;
+        let position = self.partial_input_buf().position();
+        self.partial_input_buf().set_position(position + bytes_read);
         Ok(())
     }
 
@@ -479,34 +577,33 @@ where
         mode: ProcessingMode,
     ) -> error::Result<()> {
         loop {
-            if let Some(unpacked_size) = self.unpacked_size {
-                if self.output.len() as u64 >= unpacked_size {
+            if let Some(unpacked_size) = self.unpacked_size() {
+                let unpacked_size = *unpacked_size;
+                if self.output().len() as u64 >= unpacked_size {
                     break;
                 }
             } else if match mode {
                 ProcessingMode::Partial => {
-                    rangecoder.is_eof()? && self.partial_input_buf.position() as usize == 0
+                    rangecoder.is_eof()? && self.partial_input_buf().position() as usize == 0
                 }
                 ProcessingMode::Finish => {
-                    rangecoder.is_finished_ok()? && self.partial_input_buf.position() as usize == 0
+                    rangecoder.is_finished_ok()?
+                        && self.partial_input_buf().position() as usize == 0
                 }
             } {
                 break;
             }
 
-            if self.partial_input_buf.position() as usize > 0 {
+            if self.partial_input_buf().position() as usize > 0 {
                 self.read_partial_input_buf(rangecoder)?;
-                let tmp = *self.partial_input_buf.get_ref();
+                let tmp = *self.partial_input_buf().get_ref();
 
                 // Check if we need more data to advance the decompressor
+                let position = self.partial_input_buf().position() as usize;
                 if mode == ProcessingMode::Partial
-                    && (self.partial_input_buf.position() as usize) < MAX_REQUIRED_INPUT
+                    && position < MAX_REQUIRED_INPUT
                     && self
-                        .try_process_next(
-                            &tmp[..self.partial_input_buf.position() as usize],
-                            rangecoder.range,
-                            rangecoder.code,
-                        )
+                        .try_process_next(&tmp[..position], rangecoder.range, rangecoder.code)
                         .is_err()
                 {
                     return Ok(());
@@ -514,7 +611,7 @@ where
 
                 // Run the decompressor on the tmp buffer
                 let mut tmp_reader =
-                    io::Cursor::new(&tmp[..self.partial_input_buf.position() as usize]);
+                    io::Cursor::new(&tmp[..self.partial_input_buf().position() as usize]);
                 let mut tmp_rangecoder = rangecoder::RangeDecoder::from_parts(
                     &mut tmp_reader,
                     rangecoder.range,
@@ -526,11 +623,11 @@ where
                 rangecoder.set(tmp_rangecoder.range, tmp_rangecoder.code);
 
                 // Update tmp buffer
-                let end = self.partial_input_buf.position();
+                let end = self.partial_input_buf().position();
                 let new_len = end - tmp_reader.position();
-                self.partial_input_buf.get_mut()[..new_len as usize]
+                self.partial_input_buf().get_mut()[..new_len as usize]
                     .copy_from_slice(&tmp[tmp_reader.position() as usize..end as usize]);
-                self.partial_input_buf.set_position(new_len);
+                self.partial_input_buf().set_position(new_len);
 
                 if res == ProcessingStatus::Finished {
                     break;
@@ -552,10 +649,10 @@ where
             }
         }
 
-        if let Some(len) = self.unpacked_size {
-            if mode == ProcessingMode::Finish && len != self.output.len() as u64 {
+        if let Some(len) = self.unpacked_size() {
+            if mode == ProcessingMode::Finish && *len != self.output().len() as u64 {
                 return Err(error::Error::LzmaError(
-                    "Expected unpacked size of {len} but decompressed to {self.output.len()}",
+                    "Expected unpacked size of {len} but decompressed to {self.output().len()}",
                 ));
             }
         }
@@ -569,22 +666,23 @@ where
         update: bool,
     ) -> error::Result<u8> {
         let def_prev_byte = 0u8;
-        let prev_byte = self.output.last_or(def_prev_byte) as usize;
+        let prev_byte = self.output().last_or(def_prev_byte) as usize;
 
         let mut result: usize = 1;
-        let lit_state =
-            ((self.output.len() & ((1 << self.lp) - 1)) << self.lc) + (prev_byte >> (8 - self.lc));
-        let probs = &mut self.literal_probs[lit_state];
+        let lit_state = ((self.output().len() & ((1 << self.lp()) - 1)) << self.lc())
+            + (prev_byte >> (8 - self.lc()));
 
-        if self.state >= 7 {
-            let mut match_byte = self.output.last_n(self.rep[0] + 1)? as usize;
+        if *self.state() >= 7 {
+            let v = self.rep()[0];
+            let mut match_byte = self.output().last_n(v + 1)? as usize;
 
             while result < 0x100 {
                 let match_bit = (match_byte >> 7) & 1;
                 match_byte <<= 1;
-                let bit = rangecoder
-                    .decode_bit(&mut probs[((1 + match_bit) << 8) + result], update)?
-                    as usize;
+                let bit = rangecoder.decode_bit(
+                    &mut self.literal_probs()[lit_state][((1 + match_bit) << 8) + result],
+                    update,
+                )? as usize;
                 result = (result << 1) ^ bit;
                 if match_bit != bit {
                     break;
@@ -593,7 +691,9 @@ where
         }
 
         while result < 0x100 {
-            result = (result << 1) ^ (rangecoder.decode_bit(&mut probs[result], update)? as usize);
+            result = (result << 1)
+                ^ (rangecoder.decode_bit(&mut self.literal_probs()[lit_state][result], update)?
+                    as usize);
         }
 
         Ok((result - 0x100) as u8)
@@ -607,7 +707,7 @@ where
     ) -> error::Result<usize> {
         let len_state = if length > 3 { 3 } else { length };
 
-        let pos_slot = self.pos_slot_decoder[len_state].parse(rangecoder, update)? as usize;
+        let pos_slot = self.pos_slot_decoder()[len_state].parse(rangecoder, update)? as usize;
         if pos_slot < 4 {
             return Ok(pos_slot);
         }
@@ -618,13 +718,13 @@ where
         if pos_slot < 14 {
             result += rangecoder.parse_reverse_bit_tree(
                 num_direct_bits,
-                &mut self.pos_decoders,
+                &mut self.pos_decoders(),
                 result - pos_slot,
                 update,
             )? as usize;
         } else {
             result += (rangecoder.get(num_direct_bits - 4)? as usize) << 4;
-            result += self.align_decoder.parse_reverse(rangecoder, update)? as usize;
+            result += self.align_decoder().parse_reverse(rangecoder, update)? as usize;
         }
 
         Ok(result)
