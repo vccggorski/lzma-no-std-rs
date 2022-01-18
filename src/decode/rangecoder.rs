@@ -190,10 +190,39 @@ pub struct BitTree<'a> {
 
 impl<'a> BitTree<'a> {
     pub fn new<A: Allocator>(mm: &'a A, num_bits: usize) -> Result<Self, A::Error> {
-        Ok(BitTree {
+        Ok(Self {
             num_bits,
             probs: mm.allocate(1 << num_bits, || Ok(0x400))?,
         })
+    }
+}
+
+#[cfg(feature = "std")]
+impl AbstractBitTree for StdBitTree {
+    fn num_bits(&self) -> usize {
+        self.num_bits
+    }
+    fn probs(&mut self) -> &mut [u16] {
+        self.probs.as_mut_slice()
+    }
+}
+
+// TODO: parametrize by constant and use [u16; 1 << num_bits] as soon as Rust
+// supports this
+#[cfg(feature = "std")]
+#[derive(Clone)]
+pub struct StdBitTree {
+    num_bits: usize,
+    probs: Vec<u16>,
+}
+
+#[cfg(feature = "std")]
+impl StdBitTree {
+    pub fn new(num_bits: usize) -> Self {
+        Self {
+            num_bits,
+            probs: vec![0x400; 1 << num_bits],
+        }
     }
 }
 
@@ -223,19 +252,19 @@ pub(crate) trait AbstractLenDecoder {
 
 impl<'a> AbstractLenDecoder for LenDecoder<'a> {
     type BitTree = BitTree<'a>;
-    fn choice(&mut self) -> &mut u16{
+    fn choice(&mut self) -> &mut u16 {
         &mut self.choice
     }
-    fn choice2(&mut self) -> &mut u16{
+    fn choice2(&mut self) -> &mut u16 {
         &mut self.choice2
     }
-    fn low_coder(&mut self) -> &mut [Self::BitTree]{
+    fn low_coder(&mut self) -> &mut [Self::BitTree] {
         &mut self.low_coder
     }
-    fn mid_coder(&mut self) -> &mut [Self::BitTree]{
+    fn mid_coder(&mut self) -> &mut [Self::BitTree] {
         &mut self.mid_coder
     }
-    fn high_coder(&mut self) -> &mut Self::BitTree{
+    fn high_coder(&mut self) -> &mut Self::BitTree {
         &mut self.high_coder
     }
 }
@@ -250,12 +279,54 @@ pub struct LenDecoder<'a> {
 
 impl<'a> LenDecoder<'a> {
     pub fn new<A: Allocator>(mm: &'a A) -> Result<Self, A::Error> {
-        Ok(LenDecoder {
+        Ok(Self {
             choice: 0x400,
             choice2: 0x400,
             low_coder: mm.allocate(16, || BitTree::new(mm, 3))?,
             mid_coder: mm.allocate(16, || BitTree::new(mm, 3))?,
             high_coder: BitTree::new(mm, 8)?,
         })
+    }
+}
+
+#[cfg(feature = "std")]
+impl AbstractLenDecoder for StdLenDecoder {
+    type BitTree = StdBitTree;
+    fn choice(&mut self) -> &mut u16 {
+        &mut self.choice
+    }
+    fn choice2(&mut self) -> &mut u16 {
+        &mut self.choice2
+    }
+    fn low_coder(&mut self) -> &mut [Self::BitTree] {
+        &mut self.low_coder
+    }
+    fn mid_coder(&mut self) -> &mut [Self::BitTree] {
+        &mut self.mid_coder
+    }
+    fn high_coder(&mut self) -> &mut Self::BitTree {
+        &mut self.high_coder
+    }
+}
+
+#[cfg(feature = "std")]
+pub struct StdLenDecoder {
+    choice: u16,
+    choice2: u16,
+    low_coder: Vec<StdBitTree>,
+    mid_coder: Vec<StdBitTree>,
+    high_coder: StdBitTree,
+}
+
+#[cfg(feature = "std")]
+impl StdLenDecoder {
+    pub fn new() -> Self {
+        Self {
+            choice: 0x400,
+            choice2: 0x400,
+            low_coder: vec![StdBitTree::new(3); 16],//mm.allocate(16, || BitTree::new(mm, 3))?,
+            mid_coder: vec![StdBitTree::new(3); 16],//mm.allocate(16, || BitTree::new(mm, 3))?,
+            high_coder: StdBitTree::new(8),
+        }
     }
 }
