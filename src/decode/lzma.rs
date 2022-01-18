@@ -1,6 +1,8 @@
 use crate::allocator::Allocator;
 use crate::decode::lzbuffer;
 use crate::decode::rangecoder;
+use crate::decode::rangecoder::AbstractBitTree;
+use crate::decode::rangecoder::AbstractLenDecoder;
 use crate::error;
 use crate::io_ext::ReadBytesExt;
 use byteorder::LittleEndian;
@@ -129,6 +131,9 @@ where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W> + 'a,
 {
+    type BitTree = rangecoder::BitTree<'a>;
+    type LenDecoder = rangecoder::LenDecoder<'a>;
+
     fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
         &mut self.partial_input_buf
     }
@@ -150,10 +155,10 @@ where
     fn literal_probs(&mut self) -> &mut [Vec<u16, 0x300>] {
         &mut self.literal_probs
     }
-    fn pos_slot_decoder(&mut self) -> &mut [rangecoder::BitTree<'a>] {
+    fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree] {
         &mut self.pos_slot_decoder
     }
-    fn align_decoder(&mut self) -> &mut rangecoder::BitTree<'a> {
+    fn align_decoder(&mut self) -> &mut Self::BitTree {
         &mut self.align_decoder
     }
     fn pos_decoders(&mut self) -> &mut [u16] {
@@ -183,10 +188,10 @@ where
     fn rep(&mut self) -> &mut [usize] {
         &mut self.rep
     }
-    fn len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a> {
+    fn len_decoder(&mut self) -> &mut Self::LenDecoder {
         &mut self.len_decoder
     }
-    fn rep_len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a> {
+    fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder {
         &mut self.rep_len_decoder
     }
 }
@@ -372,6 +377,8 @@ where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W> + 'a,
 {
+    type BitTree: rangecoder::AbstractBitTree;
+    type LenDecoder: rangecoder::AbstractLenDecoder;
     fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]>;
     fn output(&mut self) -> &mut LZB;
     fn lc(&self) -> u32;
@@ -379,8 +386,8 @@ where
     fn pb(&self) -> u32;
     fn unpacked_size(&mut self) -> &mut Option<u64>;
     fn literal_probs(&mut self) -> &mut [Vec<u16, 0x300>];
-    fn pos_slot_decoder(&mut self) -> &mut [rangecoder::BitTree<'a>];
-    fn align_decoder(&mut self) -> &mut rangecoder::BitTree<'a>;
+    fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree];
+    fn align_decoder(&mut self) -> &mut Self::BitTree;
     fn pos_decoders(&mut self) -> &mut [u16];
     fn is_match(&mut self) -> &mut [u16];
     fn is_rep(&mut self) -> &mut [u16];
@@ -390,8 +397,8 @@ where
     fn is_rep_0long(&mut self) -> &mut [u16];
     fn state(&mut self) -> &mut usize;
     fn rep(&mut self) -> &mut [usize];
-    fn len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a>;
-    fn rep_len_decoder(&mut self) -> &mut rangecoder::LenDecoder<'a>;
+    fn len_decoder(&mut self) -> &mut Self::LenDecoder;
+    fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder;
 
     fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
         *self.unpacked_size() = unpacked_size;

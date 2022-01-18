@@ -152,6 +152,35 @@ where
     }
 }
 
+pub(crate) trait AbstractBitTree {
+    fn num_bits(&self) -> usize;
+    fn probs(&mut self) -> &mut [u16];
+    fn parse<R: io::BufRead>(
+        &mut self,
+        rangecoder: &mut RangeDecoder<R>,
+        update: bool,
+    ) -> io::Result<u32> {
+        rangecoder.parse_bit_tree(self.num_bits(), self.probs(), update)
+    }
+
+    fn parse_reverse<R: io::BufRead>(
+        &mut self,
+        rangecoder: &mut RangeDecoder<R>,
+        update: bool,
+    ) -> io::Result<u32> {
+        rangecoder.parse_reverse_bit_tree(self.num_bits(), self.probs(), 0, update)
+    }
+}
+
+impl<'a> AbstractBitTree for BitTree<'a> {
+    fn num_bits(&self) -> usize {
+        self.num_bits
+    }
+    fn probs(&mut self) -> &mut [u16] {
+        self.probs
+    }
+}
+
 // TODO: parametrize by constant and use [u16; 1 << num_bits] as soon as Rust
 // supports this
 pub struct BitTree<'a> {
@@ -166,21 +195,48 @@ impl<'a> BitTree<'a> {
             probs: mm.allocate(1 << num_bits, || Ok(0x400))?,
         })
     }
+}
 
-    pub fn parse<R: io::BufRead>(
+pub(crate) trait AbstractLenDecoder {
+    type BitTree: AbstractBitTree;
+    fn choice(&mut self) -> &mut u16;
+    fn choice2(&mut self) -> &mut u16;
+    fn low_coder(&mut self) -> &mut [Self::BitTree];
+    fn mid_coder(&mut self) -> &mut [Self::BitTree];
+    fn high_coder(&mut self) -> &mut Self::BitTree;
+
+    fn decode<R: io::BufRead>(
         &mut self,
         rangecoder: &mut RangeDecoder<R>,
+        pos_state: usize,
         update: bool,
-    ) -> io::Result<u32> {
-        rangecoder.parse_bit_tree(self.num_bits, self.probs, update)
+    ) -> io::Result<usize> {
+        if !rangecoder.decode_bit(&mut self.choice(), update)? {
+            Ok(self.low_coder()[pos_state].parse(rangecoder, update)? as usize)
+        } else if !rangecoder.decode_bit(&mut self.choice2(), update)? {
+            Ok(self.mid_coder()[pos_state].parse(rangecoder, update)? as usize + 8)
+        } else {
+            Ok(self.high_coder().parse(rangecoder, update)? as usize + 16)
+        }
     }
+}
 
-    pub fn parse_reverse<R: io::BufRead>(
-        &mut self,
-        rangecoder: &mut RangeDecoder<R>,
-        update: bool,
-    ) -> io::Result<u32> {
-        rangecoder.parse_reverse_bit_tree(self.num_bits, self.probs, 0, update)
+impl<'a> AbstractLenDecoder for LenDecoder<'a> {
+    type BitTree = BitTree<'a>;
+    fn choice(&mut self) -> &mut u16{
+        &mut self.choice
+    }
+    fn choice2(&mut self) -> &mut u16{
+        &mut self.choice2
+    }
+    fn low_coder(&mut self) -> &mut [Self::BitTree]{
+        &mut self.low_coder
+    }
+    fn mid_coder(&mut self) -> &mut [Self::BitTree]{
+        &mut self.mid_coder
+    }
+    fn high_coder(&mut self) -> &mut Self::BitTree{
+        &mut self.high_coder
     }
 }
 
@@ -201,20 +257,5 @@ impl<'a> LenDecoder<'a> {
             mid_coder: mm.allocate(16, || BitTree::new(mm, 3))?,
             high_coder: BitTree::new(mm, 8)?,
         })
-    }
-
-    pub fn decode<R: io::BufRead>(
-        &mut self,
-        rangecoder: &mut RangeDecoder<R>,
-        pos_state: usize,
-        update: bool,
-    ) -> io::Result<usize> {
-        if !rangecoder.decode_bit(&mut self.choice, update)? {
-            Ok(self.low_coder[pos_state].parse(rangecoder, update)? as usize)
-        } else if !rangecoder.decode_bit(&mut self.choice2, update)? {
-            Ok(self.mid_coder[pos_state].parse(rangecoder, update)? as usize + 8)
-        } else {
-            Ok(self.high_coder.parse(rangecoder, update)? as usize + 16)
-        }
     }
 }
