@@ -35,21 +35,8 @@ pub mod decompress {
     pub use crate::decode::stream::Stream;
 }
 
-/// Decompress LZMA data with default
-/// [`Options`](decompress/struct.Options.html).
-pub fn lzma_decompress<A: Allocator, R: io::BufRead, W: io::Write>(
-    mm: &A,
-    input: &mut R,
-    output: &mut W,
-) -> error::Result<()>
-where
-    error::Error: From<A::Error>,
-{
-    lzma_decompress_with_options(mm, input, output, &decompress::Options::default())
-}
-
 /// Decompress LZMA data with the provided options.
-pub fn lzma_decompress_with_options<A: Allocator, R: io::BufRead, W: io::Write>(
+pub fn no_std_lzma_decompress_with_options<A: Allocator, R: io::BufRead, W: io::Write>(
     mm: &A,
     input: &mut R,
     output: &mut W,
@@ -61,9 +48,43 @@ where
     use crate::decode::lzma::AbstractDecoderState;
     let params = decode::lzma::LzmaParams::read_header(input, options)?;
     let mut decoder = if let Some(memlimit) = options.memlimit {
-        decode::lzma::new_circular_with_memlimit(mm, output, params, memlimit)?
+        decode::lzma::no_std_new_circular_with_memlimit(mm, output, params, memlimit)?
     } else {
-        decode::lzma::new_circular(mm, output, params)?
+        panic!("Must have memlimit");
+    };
+
+    let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
+        .map_err(|e| error::Error::LzmaError("LZMA stream too short: {e}"))?;
+    decoder.process(&mut rangecoder)?;
+    decoder.output.finish()?;
+    Ok(())
+}
+
+#[cfg(feature = "std")]
+/// Decompress LZMA data with default
+/// [`Options`](decompress/struct.Options.html).
+pub fn lzma_decompress<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+) -> error::Result<()>
+{
+    lzma_decompress_with_options(input, output, &decompress::Options::default())
+}
+
+#[cfg(feature = "std")]
+/// Decompress LZMA data with the provided options.
+pub fn lzma_decompress_with_options<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+    options: &decompress::Options,
+) -> error::Result<()>
+{
+    use crate::decode::lzma::AbstractDecoderState;
+    let params = decode::lzma::LzmaParams::read_header(input, options)?;
+    let mut decoder = if let Some(memlimit) = options.memlimit {
+        decode::lzma::new_circular_with_memlimit(output, params, memlimit)?
+    } else {
+        decode::lzma::new_circular(output, params)?
     };
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)

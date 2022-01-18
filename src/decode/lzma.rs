@@ -367,27 +367,71 @@ where
         rep_len_decoder: rangecoder::StdLenDecoder::new(),
     }
 }
+
+#[cfg(feature = "std")]
 // Initialize decoder with circular buffer
-pub fn new_circular<'a, A, W>(
-    mm: &'a A,
+pub fn new_circular<W>(
     output: W,
     params: LzmaParams,
-) -> error::Result<DecoderState<'a, W, lzbuffer::LzCircularBuffer<'a, W>>>
+) -> error::Result<StdDecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::StdBuffer>>>
 where
-    A: Allocator,
-    error::Error: From<A::Error>,
     W: io::Write,
 {
-    new_circular_with_memlimit(mm, output, params, usize::MAX)
+    new_circular_with_memlimit(output, params, usize::MAX)
 }
 
+#[cfg(feature = "std")]
 // Initialize decoder with circular buffer
-pub fn new_circular_with_memlimit<'a, A, W>(
-    mm: &'a A,
+pub fn new_circular_with_memlimit<W>(
     output: W,
     params: LzmaParams,
     memlimit: usize,
-) -> error::Result<DecoderState<'a, W, lzbuffer::LzCircularBuffer<'a, W>>>
+) -> error::Result<StdDecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::StdBuffer>>>
+where
+    W: io::Write,
+{
+    // Decoder
+    let decoder = StdDecoderState {
+        _phantom: PhantomData,
+        output: lzbuffer::LzCircularBuffer::from_stream_with_memlimit(
+            output,
+            params.dict_size as usize,
+            memlimit,
+        ),
+        partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+        lc: params.lc,
+        lp: params.lp,
+        pb: params.pb,
+        unpacked_size: params.unpacked_size,
+        literal_probs: vec![
+            heapless::Vec::from_iter(repeat(0x400).take(0x300));
+            1 << (params.lc + params.lp)
+        ],
+        pos_slot_decoder: vec![rangecoder::StdBitTree::new(6); 4],
+        align_decoder: rangecoder::StdBitTree::new(4),
+        pos_decoders: [0x400; 115],
+        is_match: [0x400; 192],
+        is_rep: [0x400; 12],
+        is_rep_g0: [0x400; 12],
+        is_rep_g1: [0x400; 12],
+        is_rep_g2: [0x400; 12],
+        is_rep_0long: [0x400; 192],
+        state: 0,
+        rep: [0; 4],
+        len_decoder: rangecoder::StdLenDecoder::new(),
+        rep_len_decoder: rangecoder::StdLenDecoder::new(),
+    };
+
+    Ok(decoder)
+}
+
+// Initialize decoder with circular buffer
+pub fn no_std_new_circular_with_memlimit<A, W>(
+    mm: &A,
+    output: W,
+    params: LzmaParams,
+    memlimit: usize,
+) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::Buffer>>>
 where
     A: Allocator,
     error::Error: From<A::Error>,
@@ -396,7 +440,7 @@ where
     // Decoder
     let decoder = DecoderState {
         _phantom: PhantomData,
-        output: lzbuffer::LzCircularBuffer::from_stream_with_memlimit(
+        output: lzbuffer::LzCircularBuffer::no_std_from_stream_with_memlimit(
             mm,
             output,
             params.dict_size as usize,

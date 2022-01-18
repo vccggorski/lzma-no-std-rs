@@ -160,23 +160,66 @@ where
     }
 }
 
-// A circular buffer for LZ sequences
-pub struct LzCircularBuffer<'a, W>
-where
-    W: io::Write,
-{
-    stream: W,         // Output sink
-    buf: &'a mut [u8], // Circular buffer
-    dict_size: usize,  // Length of the buffer
-    cursor: usize,     // Current position
-    len: usize,        // Total number of bytes sent through the buffer
+pub trait AbstractBuffer {
+    fn buf(&self) -> &[u8];
+    fn buf_mut(&mut self) -> &mut [u8];
+    fn resize(&mut self, new_len: usize, v: u8);
 }
 
-impl<'a, W> LzCircularBuffer<'a, W>
+impl<'a> AbstractBuffer for Buffer<'a> {
+    fn buf(&self) -> &[u8] {
+        self.buf
+    }
+    fn buf_mut(&mut self) -> &mut [u8] {
+        self.buf
+    }
+    fn resize(&mut self, new_len: usize, v: u8) {
+        unimplemented!("no-std slice-based buffer is not resizable");
+    }
+}
+
+pub struct Buffer<'a> {
+    buf: &'a mut [u8], // Circular buffer
+}
+
+#[cfg(feature = "std")]
+impl AbstractBuffer for StdBuffer {
+    fn buf(&self) -> &[u8] {
+        self.buf.as_slice()
+    }
+    fn buf_mut(&mut self) -> &mut [u8] {
+        self.buf.as_mut_slice()
+    }
+    fn resize(&mut self, new_len: usize, v: u8) {
+        self.buf.resize(new_len, v);
+    }
+}
+
+#[cfg(feature = "std")]
+#[derive(Default)]
+pub struct StdBuffer {
+    buf: Vec<u8>, // Circular buffer
+}
+
+// A circular buffer for LZ sequences
+pub struct LzCircularBuffer<W, B>
+where
+    W: io::Write,
+    B: AbstractBuffer,
+{
+    stream: W,        // Output sink
+    buf: B,           // Circular buffer
+    dict_size: usize, // Length of the buffer
+    memlimit: usize,  // Buffer memory limit
+    cursor: usize,    // Current position
+    len: usize,       // Total number of bytes sent through the buffer
+}
+
+impl<'a, W> LzCircularBuffer<W, Buffer<'a>>
 where
     W: io::Write,
 {
-    pub fn from_stream_with_memlimit<A: Allocator>(
+    pub fn no_std_from_stream_with_memlimit<A: Allocator>(
         mm: &'a A,
         stream: W,
         dict_size: usize,
@@ -185,31 +228,65 @@ where
         lzma_info!("Dict size in LZ buffer: {}", dict_size);
         Ok(Self {
             stream,
-            buf: mm.allocate_default(memlimit)?,
+            buf: Buffer {
+                buf: mm.allocate_default(memlimit)?,
+            },
             dict_size,
+            memlimit,
             cursor: 0,
             len: 0,
         })
     }
+}
 
+#[cfg(feature = "std")]
+impl<W> LzCircularBuffer<W, StdBuffer>
+where
+    W: io::Write,
+{
+    pub fn from_stream_with_memlimit(stream: W, dict_size: usize, memlimit: usize) -> Self {
+        lzma_info!("Dict size in LZ buffer: {}", dict_size);
+        Self {
+            stream,
+            buf: Default::default(),
+            dict_size,
+            memlimit,
+            cursor: 0,
+            len: 0,
+        }
+    }
+}
+
+impl<W, B> LzCircularBuffer<W, B>
+where
+    W: io::Write,
+    B: AbstractBuffer,
+{
     fn get(&self, index: usize) -> u8 {
-        *self.buf.get(index).unwrap_or(&0)
+        *self.buf.buf().get(index).unwrap_or(&0)
     }
 
     fn set(&mut self, index: usize, value: u8) -> error::Result<()> {
-        if self.buf.len() <= index + 1 {
-            return Err(error::Error::LzmaError(
-                "exceeded memory limit of {self.memlimit}",
-            ));
+        let new_len = index + 1;
+
+        if self.buf.buf().len() < new_len {
+            if new_len <= self.memlimit {
+                self.buf.resize(new_len, 0);
+            } else {
+                return Err(error::Error::LzmaError(
+                    "exceeded memory limit of {self.memlimit}",
+                ));
+            }
         }
-        self.buf[index] = value;
+        self.buf.buf_mut()[index] = value;
         Ok(())
     }
 }
 
-impl<'a, W> LzBuffer<W> for LzCircularBuffer<'a, W>
+impl<W, B> LzBuffer<W> for LzCircularBuffer<W, B>
 where
     W: io::Write,
+    B: AbstractBuffer,
 {
     fn len(&self) -> usize {
         self.len
@@ -249,7 +326,7 @@ where
 
         // Flush the circular buffer to the output
         if self.cursor == self.dict_size {
-            self.stream.write_all(self.buf)?;
+            self.stream.write_all(self.buf.buf_mut())?;
             self.cursor = 0;
         }
 
@@ -295,7 +372,7 @@ where
     // Consumes this buffer and flushes any data
     fn finish(mut self) -> io::Result<W> {
         if self.cursor > 0 {
-            self.stream.write_all(&self.buf[0..self.cursor])?;
+            self.stream.write_all(&self.buf.buf_mut()[0..self.cursor])?;
             self.stream.flush()?;
         }
         Ok(self.stream)
