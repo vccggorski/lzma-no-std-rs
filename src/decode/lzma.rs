@@ -10,7 +10,6 @@ use core::iter::repeat;
 use core::iter::FromIterator;
 use core::marker::PhantomData;
 use core2::io;
-use heapless::Vec;
 
 use crate::decompress::Options;
 use crate::decompress::UnpackedSize;
@@ -126,6 +125,110 @@ impl LzmaParams {
     }
 }
 
+#[cfg(feature = "std")]
+impl<'a, W, LZB> AbstractDecoderState<'a, W, LZB> for StdDecoderState<W, LZB>
+where
+    W: io::Write,
+    LZB: lzbuffer::LzBuffer<W> + 'a,
+{
+    type BitTree = rangecoder::StdBitTree;
+    type LenDecoder = rangecoder::StdLenDecoder;
+
+    fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
+        &mut self.partial_input_buf
+    }
+    fn output(&mut self) -> &mut LZB {
+        &mut self.output
+    }
+    fn lc(&self) -> u32 {
+        self.lc
+    }
+    fn lp(&self) -> u32 {
+        self.lp
+    }
+    fn pb(&self) -> u32 {
+        self.pb
+    }
+    fn unpacked_size(&mut self) -> &mut Option<u64> {
+        &mut self.unpacked_size
+    }
+    fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>] {
+        &mut self.literal_probs
+    }
+    fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree] {
+        &mut self.pos_slot_decoder
+    }
+    fn align_decoder(&mut self) -> &mut Self::BitTree {
+        &mut self.align_decoder
+    }
+    fn pos_decoders(&mut self) -> &mut [u16] {
+        &mut self.pos_decoders
+    }
+    fn is_match(&mut self) -> &mut [u16] {
+        &mut self.is_match
+    }
+    fn is_rep(&mut self) -> &mut [u16] {
+        &mut self.is_rep
+    }
+    fn is_rep_g0(&mut self) -> &mut [u16] {
+        &mut self.is_rep_g0
+    }
+    fn is_rep_g1(&mut self) -> &mut [u16] {
+        &mut self.is_rep_g1
+    }
+    fn is_rep_g2(&mut self) -> &mut [u16] {
+        &mut self.is_rep_g2
+    }
+    fn is_rep_0long(&mut self) -> &mut [u16] {
+        &mut self.is_rep_0long
+    }
+    fn state(&mut self) -> &mut usize {
+        &mut self.state
+    }
+    fn rep(&mut self) -> &mut [usize] {
+        &mut self.rep
+    }
+    fn len_decoder(&mut self) -> &mut Self::LenDecoder {
+        &mut self.len_decoder
+    }
+    fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder {
+        &mut self.rep_len_decoder
+    }
+}
+
+#[cfg(feature = "std")]
+pub struct StdDecoderState<W, LZB>
+where
+    W: io::Write,
+    LZB: lzbuffer::LzBuffer<W>,
+{
+    _phantom: PhantomData<W>,
+    // Buffer input data here if we need more for decompression. Up to
+    // MAX_REQUIRED_INPUT bytes can be consumed during one iteration.
+    partial_input_buf: std::io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
+    pub output: LZB,
+    // most lc significant bits of previous byte are part of the literal context
+    pub lc: u32, // 0..8
+    pub lp: u32, // 0..4
+    // context for literal/match is plaintext offset modulo 2^pb
+    pub pb: u32, // 0..4
+    unpacked_size: Option<u64>,
+    literal_probs: Vec<heapless::Vec<u16, 0x300>>,
+    pos_slot_decoder: Vec<rangecoder::StdBitTree>,
+    align_decoder: rangecoder::StdBitTree,
+    pos_decoders: [u16; 115],
+    is_match: [u16; 192], // true = LZ, false = literal
+    is_rep: [u16; 12],
+    is_rep_g0: [u16; 12],
+    is_rep_g1: [u16; 12],
+    is_rep_g2: [u16; 12],
+    is_rep_0long: [u16; 192],
+    state: usize,
+    rep: [usize; 4],
+    len_decoder: rangecoder::StdLenDecoder,
+    rep_len_decoder: rangecoder::StdLenDecoder,
+}
+
 impl<'a, W, LZB> AbstractDecoderState<'a, W, LZB> for DecoderState<'a, W, LZB>
 where
     W: io::Write,
@@ -152,7 +255,7 @@ where
     fn unpacked_size(&mut self) -> &mut Option<u64> {
         &mut self.unpacked_size
     }
-    fn literal_probs(&mut self) -> &mut [Vec<u16, 0x300>] {
+    fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>] {
         &mut self.literal_probs
     }
     fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree] {
@@ -212,7 +315,7 @@ where
     // context for literal/match is plaintext offset modulo 2^pb
     pub pb: u32, // 0..4
     unpacked_size: Option<u64>,
-    literal_probs: &'a mut [Vec<u16, 0x300>],
+    literal_probs: &'a mut [heapless::Vec<u16, 0x300>],
     pos_slot_decoder: &'a mut [rangecoder::BitTree<'a>],
     align_decoder: rangecoder::BitTree<'a>,
     pos_decoders: &'a mut [u16],
@@ -230,47 +333,40 @@ where
 
 #[cfg(feature = "std")]
 // Initialize decoder with accumulating buffer
-pub fn new_accum<'a, A, W>(
-    mm: &'a A,
+pub fn new_accum<W>(
     output: lzbuffer::LzAccumBuffer<W>,
     lc: u32,
     lp: u32,
     pb: u32,
     unpacked_size: Option<u64>,
-) -> error::Result<DecoderState<'a, W, lzbuffer::LzAccumBuffer<W>>>
+) -> StdDecoderState<W, lzbuffer::LzAccumBuffer<W>>
 where
-    A: Allocator,
-    error::Error: From<A::Error>,
     W: io::Write,
 {
-    let decoder = DecoderState {
+    StdDecoderState {
         _phantom: PhantomData,
-        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+        partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
         output,
         lc,
         lp,
         pb,
         unpacked_size,
-        literal_probs: mm.allocate(1 << (lc + lp), || {
-            Ok(Vec::from_iter(repeat(0x400).take(0x300)))
-        })?,
-        pos_slot_decoder: mm.allocate(4, || rangecoder::BitTree::new(mm, 6))?,
-        align_decoder: rangecoder::BitTree::new(mm, 4)?,
-        pos_decoders: mm.allocate(115, || Ok(0x400))?,
-        is_match: mm.allocate(192, || Ok(0x400))?,
-        is_rep: mm.allocate(12, || Ok(0x400))?,
-        is_rep_g0: mm.allocate(12, || Ok(0x400))?,
-        is_rep_g1: mm.allocate(12, || Ok(0x400))?,
-        is_rep_g2: mm.allocate(12, || Ok(0x400))?,
-        is_rep_0long: mm.allocate(192, || Ok(0x400))?,
+        literal_probs: vec![heapless::Vec::from_iter(repeat(0x400).take(0x300)); 1 << (lc + lp)],
+        pos_slot_decoder: vec![rangecoder::StdBitTree::new(6); 4],
+        align_decoder: rangecoder::StdBitTree::new(4),
+        pos_decoders: [0x400; 115],
+        is_match: [0x400; 192],
+        is_rep: [0x400; 12],
+        is_rep_g0: [0x400; 12],
+        is_rep_g1: [0x400; 12],
+        is_rep_g2: [0x400; 12],
+        is_rep_0long: [0x400; 192],
         state: 0,
         rep: [0; 4],
-        len_decoder: rangecoder::LenDecoder::new(mm)?,
-        rep_len_decoder: rangecoder::LenDecoder::new(mm)?,
-    };
-    Ok(decoder)
+        len_decoder: rangecoder::StdLenDecoder::new(),
+        rep_len_decoder: rangecoder::StdLenDecoder::new(),
+    }
 }
-
 // Initialize decoder with circular buffer
 pub fn new_circular<'a, A, W>(
     mm: &'a A,
@@ -312,7 +408,7 @@ where
         pb: params.pb,
         unpacked_size: params.unpacked_size,
         literal_probs: mm.allocate(1 << (params.lc + params.lp), || {
-            Ok(Vec::from_iter(repeat(0x400).take(0x300)))
+            Ok(heapless::Vec::from_iter(repeat(0x400).take(0x300)))
         })?,
         pos_slot_decoder: mm.allocate(4, || rangecoder::BitTree::new(mm, 6))?,
         align_decoder: rangecoder::BitTree::new(mm, 4)?,
@@ -332,43 +428,31 @@ where
     Ok(decoder)
 }
 
-impl<'a, W, LZB> DecoderState<'a, W, LZB>
+#[cfg(feature = "std")]
+impl<W, LZB> StdDecoderState<W, LZB>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
 {
-    #[cfg(feature = "std")]
-    pub fn reset_state<A: Allocator>(
-        &mut self,
-        mm: &'a A,
-        lc: u32,
-        lp: u32,
-        pb: u32,
-    ) -> Result<(), A::Error> {
+    pub fn reset_state(&mut self, lc: u32, lp: u32, pb: u32) {
         self.lc = lc;
         self.lp = lp;
         self.pb = pb;
-        self.literal_probs = mm.reallocate(self.literal_probs, 1 << (lc + lp), || {
-            Ok(Vec::from_iter(repeat(0x400).take(0x300)))
-        })?;
-        self.pos_decoders.iter_mut().for_each(|v| *v = 0x400);
-        self.is_match.iter_mut().for_each(|v| *v = 0x400);
-        self.is_rep.iter_mut().for_each(|v| *v = 0x400);
-        self.is_rep_g0.iter_mut().for_each(|v| *v = 0x400);
-        self.is_rep_g1.iter_mut().for_each(|v| *v = 0x400);
-        self.is_rep_g2.iter_mut().for_each(|v| *v = 0x400);
-        self.is_rep_0long.iter_mut().for_each(|v| *v = 0x400);
+        self.literal_probs =
+            vec![heapless::Vec::from_iter(repeat(0x400).take(0x300)); 1 << (lc + lp)];
+        self.pos_slot_decoder = vec![rangecoder::StdBitTree::new(6); 4];
+        self.align_decoder = rangecoder::StdBitTree::new(4);
+        self.pos_decoders = [0x400; 115];
+        self.is_match = [0x400; 192];
+        self.is_rep = [0x400; 12];
+        self.is_rep_g0 = [0x400; 12];
+        self.is_rep_g1 = [0x400; 12];
+        self.is_rep_g2 = [0x400; 12];
+        self.is_rep_0long = [0x400; 192];
         self.state = 0;
         self.rep = [0; 4];
-        unsafe {
-            self.pos_slot_decoder
-                .iter_mut()
-                .for_each(|v| *v = rangecoder::BitTree::new(mm, 6).unwrap_unchecked());
-            self.align_decoder = rangecoder::BitTree::new(mm, 4).unwrap_unchecked();
-            self.len_decoder = rangecoder::LenDecoder::new(mm).unwrap_unchecked();
-            self.rep_len_decoder = rangecoder::LenDecoder::new(mm).unwrap_unchecked();
-        }
-        Ok(())
+        self.len_decoder = rangecoder::StdLenDecoder::new();
+        self.rep_len_decoder = rangecoder::StdLenDecoder::new();
     }
 }
 
@@ -385,7 +469,7 @@ where
     fn lp(&self) -> u32;
     fn pb(&self) -> u32;
     fn unpacked_size(&mut self) -> &mut Option<u64>;
-    fn literal_probs(&mut self) -> &mut [Vec<u16, 0x300>];
+    fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>];
     fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree];
     fn align_decoder(&mut self) -> &mut Self::BitTree;
     fn pos_decoders(&mut self) -> &mut [u16];

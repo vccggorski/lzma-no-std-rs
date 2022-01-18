@@ -16,8 +16,7 @@ where
     W: io::Write,
 {
     let accum = lzbuffer::LzAccumBuffer::from_stream(output);
-    let mm = crate::allocator::StdMemoryDispenser::default();
-    let mut decoder = lzma::new_accum(&mm, accum, 0, 0, 0, None).unwrap();
+    let mut decoder = lzma::new_accum(accum, 0, 0, 0, None);
 
     loop {
         let status = input
@@ -36,7 +35,7 @@ where
             // uncompressed no reset
             parse_uncompressed(&mut decoder, input, false)?;
         } else {
-            parse_lzma(&mut decoder, &mm, input, status)?;
+            parse_lzma(&mut decoder, input, status)?;
         }
     }
 
@@ -44,17 +43,14 @@ where
     Ok(())
 }
 
-fn parse_lzma<'a, 'b, A, R, W>(
-    decoder: &'a mut lzma::DecoderState<'b, W, lzbuffer::LzAccumBuffer<W>>,
-    mm: &'b A,
+fn parse_lzma<R, W>(
+    decoder: &mut lzma::StdDecoderState<W, lzbuffer::LzAccumBuffer<W>>,
     input: &mut R,
     status: u8,
 ) -> error::Result<()>
 where
-    A: Allocator,
-    error::Error: From<A::Error>,
     R: io::BufRead,
-    W: io::Write + 'b,
+    W: io::Write,
 {
     if status & 0x80 == 0 {
         return Err(error::Error::LzmaError(
@@ -147,7 +143,7 @@ where
             pb = decoder.pb;
         }
 
-        decoder.reset_state(mm, lc, lp, pb)?;
+        decoder.reset_state(lc, lp, pb);
     }
 
     decoder.set_unpacked_size(Some(unpacked_size + decoder.output.len() as u64));
@@ -159,7 +155,7 @@ where
 }
 
 fn parse_uncompressed<R, W>(
-    decoder: &mut lzma::DecoderState<W, lzbuffer::LzAccumBuffer<W>>,
+    decoder: &mut lzma::StdDecoderState<W, lzbuffer::LzAccumBuffer<W>>,
     input: &mut R,
     reset_dict: bool,
 ) -> error::Result<()>
