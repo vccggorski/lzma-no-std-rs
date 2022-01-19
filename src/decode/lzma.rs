@@ -25,7 +25,7 @@ const MAX_REQUIRED_INPUT: usize = 20;
 /// Tells the decompressor if we should expect more data after parsing the
 /// current input.
 #[derive(Debug, PartialEq)]
-pub(crate) enum ProcessingMode {
+pub enum ProcessingMode {
     /// Streaming mode. Process the input bytes but assume there will be more
     /// chunks of input data to receive in future calls to `process_mode()`.
     Partial,
@@ -40,7 +40,7 @@ pub(crate) enum ProcessingMode {
 ///
 /// Indicates whether processing should continue or is finished.
 #[derive(Debug, PartialEq)]
-pub(crate) enum ProcessingStatus {
+pub enum ProcessingStatus {
     Continue,
     Finished,
 }
@@ -137,7 +137,13 @@ where
     fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
         &mut self.partial_input_buf
     }
-    fn output(&mut self) -> &mut LZB {
+    fn into_output(self) -> LZB {
+        self.output
+    }
+    fn output(&self) -> &LZB {
+        &self.output
+    }
+    fn output_mut(&mut self) -> &mut LZB {
         &mut self.output
     }
     fn lc(&self) -> u32 {
@@ -240,7 +246,13 @@ where
     fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
         &mut self.partial_input_buf
     }
-    fn output(&mut self) -> &mut LZB {
+    fn into_output(self) -> LZB {
+        self.output
+    }
+    fn output(&self) -> &LZB {
+        &self.output
+    }
+    fn output_mut(&mut self) -> &mut LZB {
         &mut self.output
     }
     fn lc(&self) -> u32 {
@@ -516,7 +528,7 @@ where
     }
 }
 
-pub(crate) trait AbstractDecoderState<'a, W, LZB>
+pub trait AbstractDecoderState<'a, W, LZB>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W> + 'a,
@@ -524,7 +536,9 @@ where
     type BitTree: rangecoder::AbstractBitTree;
     type LenDecoder: rangecoder::AbstractLenDecoder;
     fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]>;
-    fn output(&mut self) -> &mut LZB;
+    fn into_output(self) -> LZB;
+    fn output(&self) -> &LZB;
+    fn output_mut(&mut self) -> &mut LZB;
     fn lc(&self) -> u32;
     fn lp(&self) -> u32;
     fn pb(&self) -> u32;
@@ -587,7 +601,7 @@ where
 
             if update {
                 lzma_debug!("Literal: {}", byte);
-                self.output().append_literal(byte)?;
+                self.output_mut().append_literal(byte)?;
 
                 *self.state() = if *self.state() < 4 {
                     0
@@ -615,7 +629,7 @@ where
                     if update {
                         *self.state() = if state < 7 { 9 } else { 11 };
                         let dist = self.rep()[0] + 1;
-                        self.output().append_lz(1, dist)?;
+                        self.output_mut().append_lz(1, dist)?;
                     }
                     return Ok(ProcessingStatus::Continue);
                 }
@@ -683,7 +697,7 @@ where
             len += 2;
 
             let dist = self.rep()[0] + 1;
-            self.output().append_lz(len, dist)?;
+            self.output_mut().append_lz(len, dist)?;
         }
 
         Ok(ProcessingStatus::Continue)

@@ -5,7 +5,7 @@
 //! Pure-Rust codecs for LZMA, LZMA2, and XZ.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![deny(missing_debug_implementations)]
+#![warn(missing_debug_implementations)]
 
 #[macro_use]
 mod macros;

@@ -152,7 +152,7 @@ where
     }
 }
 
-pub(crate) trait AbstractBitTree {
+pub trait AbstractBitTree {
     fn num_bits(&self) -> usize;
     fn probs(&mut self) -> &mut [u16];
     fn parse<R: io::BufRead>(
@@ -226,7 +226,7 @@ impl StdBitTree {
     }
 }
 
-pub(crate) trait AbstractLenDecoder {
+pub trait AbstractLenDecoder {
     type BitTree: AbstractBitTree;
     fn choice(&mut self) -> &mut u16;
     fn choice2(&mut self) -> &mut u16;

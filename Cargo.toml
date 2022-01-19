@@ -25,8 +25,7 @@ env_logger = { version = "^0.8.3" }
 [features]
 default = ["std"]
 std = ["core2/std"]
-enable_logging = ["log"]
-stream = ["std"]
+stream = []
 
 [package.metadata.docs.rs]
 features = ["stream"]
