@@ -377,7 +377,8 @@ pub fn new_circular<W>(
 where
     W: io::Write,
 {
-    new_circular_with_memlimit(output, params, usize::MAX)
+    let dict_size = params.dict_size;
+    new_circular_with_memlimit(output, params, dict_size as usize)
 }
 
 #[cfg(feature = "std")]
@@ -423,6 +424,21 @@ where
     };
 
     Ok(decoder)
+}
+
+// Initialize decoder with circular buffer
+pub fn no_std_new_circular<A, W>(
+    mm: &A,
+    output: W,
+    params: LzmaParams,
+) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::Buffer>>>
+where
+    A: Allocator,
+    error::Error: From<A::Error>,
+    W: io::Write,
+{
+    let dict_size = params.dict_size;
+    no_std_new_circular_with_memlimit(mm, output, params, dict_size as usize)
 }
 
 // Initialize decoder with circular buffer

@@ -50,7 +50,7 @@ where
     let mut decoder = if let Some(memlimit) = options.memlimit {
         decode::lzma::no_std_new_circular_with_memlimit(mm, output, params, memlimit)?
     } else {
-        panic!("Must have memlimit");
+        decode::lzma::no_std_new_circular(mm, output, params)?
     };
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
@@ -209,6 +209,14 @@ pub mod allocator {
             let t_size = core::mem::size_of::<T>();
             let allocate_bytes = t_size * count;
             let used = *self.used.borrow();
+            lzma_trace!(
+                "Allocate {:>6}B; used: {:>6}/{}B (&mut [{}; {}])",
+                allocate_bytes,
+                used + allocate_bytes,
+                self.memory.len(),
+                core::any::type_name::<T>(),
+                count,
+            );
             if used + allocate_bytes > self.memory.len() {
                 return Err(OutOfMemory {
                     memory_size: self.memory.len(),

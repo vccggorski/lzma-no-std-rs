@@ -174,7 +174,7 @@ impl<'a> AbstractBuffer for Buffer<'a> {
         self.buf
     }
     fn resize(&mut self, new_len: usize, v: u8) {
-        unimplemented!("no-std slice-based buffer is not resizable");
+        unimplemented!("slice-based buffer is not resizable");
     }
 }
 
