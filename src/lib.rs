@@ -165,6 +165,8 @@ pub mod allocator {
         ) -> Result<&mut [T], Self::Error> {
             self.allocate(count, || Ok(Default::default()))
         }
+
+        fn reset(&mut self);
     }
 
     /// This trait prevents users from allocating types that might require
@@ -240,6 +242,11 @@ pub mod allocator {
                 *v = init()?;
             }
             Ok(output_slice)
+        }
+
+        fn reset(&mut self) {
+            self.memory.fill(0);
+            *self.used.borrow_mut() = 0;
         }
     }
 }
