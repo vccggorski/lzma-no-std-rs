@@ -177,10 +177,18 @@ pub mod allocator {
     unsafe impl<T: Copy, const S: usize> Allocatable for heapless::Vec<T, S> {}
     unsafe impl<'a> Allocatable for crate::decode::rangecoder::BitTree<'a> {}
 
-    #[derive(Debug)]
     pub struct MemoryDispenser<'a> {
         memory: &'a mut [u8],
         used: RefCell<usize>,
+    }
+
+    impl<'a> core::fmt::Debug for MemoryDispenser<'a> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_struct("MemoryDispenser")
+                .field("memory_size", &self.memory.len())
+                .field("memory_used", &self.used.borrow())
+                .finish()
+        }
     }
 
     #[derive(Debug)]
