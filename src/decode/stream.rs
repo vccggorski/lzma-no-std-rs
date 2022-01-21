@@ -211,15 +211,15 @@ where
     > {
         match LzmaParams::read_header(&mut input, options) {
             Ok(params) => {
-                let decoder = if let Some(memlimit) = options.memlimit {
-                    new_circular_with_memlimit(output, params, memlimit)
-                } else {
-                    new_circular(output, params)
-                }?;
-
                 // The RangeDecoder is only kept temporarily as we are processing
                 // chunks of data.
                 if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
+                    let decoder = if let Some(memlimit) = options.memlimit {
+                        new_circular_with_memlimit(output, params, memlimit)
+                    } else {
+                        new_circular(output, params)
+                    }?;
+
                     Ok(State::Data(RunState {
                         __: Default::default(),
                         decoder,
@@ -229,7 +229,7 @@ where
                 } else {
                     // Failed to create a RangeDecoder because we need more data,
                     // try again later.
-                    Ok(State::Header(decoder.output.into_output()))
+                    Ok(State::Header(output))
                 }
             }
             // Failed to read_header() because we need more data, try again later.
@@ -280,15 +280,15 @@ where
     > {
         match LzmaParams::read_header(&mut input, options) {
             Ok(params) => {
-                let decoder = if let Some(memlimit) = options.memlimit {
-                    no_std_new_circular_with_memlimit(mm, output, params, memlimit)
-                } else {
-                    no_std_new_circular(mm, output, params)
-                }?;
-
                 // The RangeDecoder is only kept temporarily as we are processing
                 // chunks of data.
                 if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
+                    let decoder = if let Some(memlimit) = options.memlimit {
+                        no_std_new_circular_with_memlimit(mm, output, params, memlimit)
+                    } else {
+                        no_std_new_circular(mm, output, params)
+                    }?;
+
                     Ok(State::Data(RunState {
                         __: Default::default(),
                         decoder,
@@ -298,7 +298,7 @@ where
                 } else {
                     // Failed to create a RangeDecoder because we need more data,
                     // try again later.
-                    Ok(State::Header(decoder.output.into_output()))
+                    Ok(State::Header(output))
                 }
             }
             // Failed to read_header() because we need more data, try again later.
