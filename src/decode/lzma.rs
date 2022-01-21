@@ -155,7 +155,10 @@ where
     fn pb(&self) -> u32 {
         self.pb
     }
-    fn unpacked_size(&mut self) -> &mut Option<u64> {
+    fn unpacked_size(&self) -> &Option<u64> {
+        &self.unpacked_size
+    }
+    fn unpacked_size_mut(&mut self) -> &mut Option<u64> {
         &mut self.unpacked_size
     }
     fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>] {
@@ -264,7 +267,10 @@ where
     fn pb(&self) -> u32 {
         self.pb
     }
-    fn unpacked_size(&mut self) -> &mut Option<u64> {
+    fn unpacked_size(&self) -> &Option<u64> {
+        &self.unpacked_size
+    }
+    fn unpacked_size_mut(&mut self) -> &mut Option<u64> {
         &mut self.unpacked_size
     }
     fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>] {
@@ -542,7 +548,8 @@ where
     fn lc(&self) -> u32;
     fn lp(&self) -> u32;
     fn pb(&self) -> u32;
-    fn unpacked_size(&mut self) -> &mut Option<u64>;
+    fn unpacked_size(&self) -> &Option<u64>;
+    fn unpacked_size_mut(&mut self) -> &mut Option<u64>;
     fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>];
     fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree];
     fn align_decoder(&mut self) -> &mut Self::BitTree;
@@ -559,7 +566,7 @@ where
     fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder;
 
     fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
-        *self.unpacked_size() = unpacked_size;
+        *self.unpacked_size_mut() = unpacked_size;
     }
 
     fn process<'b, R: io::BufRead>(

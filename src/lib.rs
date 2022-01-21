@@ -33,6 +33,8 @@ pub mod decompress {
     pub use crate::decode::options::*;
     #[cfg(feature = "stream")]
     pub use crate::decode::stream::Stream;
+    #[cfg(feature = "stream")]
+    pub use crate::decode::stream::StreamStatus;
 }
 
 /// Decompress LZMA data with the provided options.

@@ -35,11 +35,10 @@ const MAX_TMP_LEN: usize = MAX_HEADER_LEN + START_BYTES;
 
 /// Internal state of this streaming decoder. This is needed because we have to
 /// initialize the stream before processing any data.
-#[derive(Debug)]
 enum State<'a, W, B, ADS>
 where
-    W: Write + 'a,
-    B: AbstractBuffer + 'a,
+    W: Write,
+    B: AbstractBuffer,
     ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
 {
     /// Stream is initialized but header values have not yet been read.
@@ -47,6 +46,21 @@ where
     /// Header values have been read and the stream is ready to process more
     /// data.
     Data(RunState<'a, W, B, ADS>),
+}
+
+impl<'a, W, B, ADS> Debug for State<'a, W, B, ADS>
+where
+    W: Write,
+    B: AbstractBuffer,
+    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
+{
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use State::*;
+        match self {
+            Data(run_state) => run_state.fmt(fmt),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Structures needed while decoding data.
@@ -76,6 +90,32 @@ where
     }
 }
 
+impl<'a, W, B, ADS> Debug for Stream<'a, W, B, ADS>
+where
+    W: Write + Debug,
+    B: AbstractBuffer,
+    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
+{
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+        fmt.debug_struct("Stream")
+            .field("tmp", &self.tmp)
+            .field("state", &self.state)
+            .field("options", &self.options)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub enum StreamStatus {
+    ProcessingHeader,
+    ProcessingData {
+        unpacked_data_processed: u64,
+        unpacked_size: Option<u64>,
+    },
+    InvalidState,
+    Finished,
+}
+
 /// Lzma decompressor that can process multiple chunks of data using the
 /// `io::Write` interface.
 pub struct Stream<'a, W, B, ADS>
@@ -101,6 +141,28 @@ where
     B: AbstractBuffer,
     ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
 {
+    pub fn get_stream_status(&self) -> StreamStatus {
+        use State::*;
+        use StreamStatus::*;
+        match &self.state {
+            Some(Header(_)) => ProcessingHeader,
+            Some(Data(run_state)) => {
+                let unpacked_size = *run_state.decoder.unpacked_size();
+                let unpacked_data_processed =
+                    run_state.decoder.output().len() as u64 + self.tmp.position();
+                if let Some(unpacked_size) = unpacked_size {
+                    if unpacked_size == unpacked_data_processed {
+                        return Finished;
+                    }
+                }
+                ProcessingData {
+                    unpacked_size,
+                    unpacked_data_processed,
+                }
+            }
+            None => InvalidState,
+        }
+    }
     /// Get a reference to the output sink
     pub fn get_output(&self) -> Option<&W> {
         self.state.as_ref().map(|state| match state {
@@ -306,21 +368,6 @@ where
             // Fatal error. Don't retry.
             Err(e) => Err(e),
         }
-    }
-}
-
-impl<'a, W, B, ADS> Debug for Stream<'a, W, B, ADS>
-where
-    W: Write + Debug,
-    B: AbstractBuffer + Debug,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>> + Debug,
-{
-    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
-        fmt.debug_struct("Stream")
-            .field("tmp", &self.tmp.position())
-            .field("state", &self.state)
-            .field("options", &self.options)
-            .finish()
     }
 }
 
