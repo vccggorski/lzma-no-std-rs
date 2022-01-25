@@ -30,7 +30,16 @@ pub mod compress {
 
 /// Decompression helpers.
 pub mod decompress {
+    pub use crate::decode::lzbuffer::Buffer;
+    pub use crate::decode::lzbuffer::LzCircularBuffer;
+    #[cfg(feature = "std")]
+    pub use crate::decode::lzbuffer::StdBuffer;
+    pub use crate::decode::lzma::DecoderState;
+    #[cfg(feature = "std")]
+    pub use crate::decode::lzma::StdDecoderState;
     pub use crate::decode::options::*;
+    #[cfg(feature = "stream")]
+    pub use crate::decode::stream::no_std;
     #[cfg(feature = "stream")]
     pub use crate::decode::stream::Stream;
     #[cfg(feature = "stream")]

@@ -16,6 +16,14 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 use core2::io::{self, BufRead, Cursor, Read, Write};
 
+pub mod no_std {
+    use super::*;
+    pub type Stream<'a, W> =
+        super::Stream<'a, W, Buffer<'a>, DecoderState<'a, W, LzCircularBuffer<W, Buffer<'a>>>>;
+
+    unsafe impl<'a, W: Write> core::marker::Send for Stream<'a, W> {}
+}
+
 /// Minimum header length to be read.
 /// - props: u8 (1 byte)
 /// - dict_size: u32 (4 bytes)
