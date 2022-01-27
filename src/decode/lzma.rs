@@ -5,9 +5,11 @@ use crate::decompress::UnpackedSize;
 use crate::error;
 use crate::io;
 use byteorder::LittleEndian;
+use core::iter::repeat;
+use core::iter::FromIterator;
 use core::marker::PhantomData;
-use io::ReadBytesExt;
 use heapless::Vec;
+use io::ReadBytesExt;
 
 /// Maximum input data that can be processed in one iteration.
 /// Libhtp uses the following equation to define the maximum number of bits
@@ -120,7 +122,7 @@ impl LzmaParams {
     }
 }
 
-pub struct DecoderState<W, LZB>
+pub struct DecoderState<W, LZB, const PROBS_MEM_LIMIT: usize>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
@@ -136,9 +138,9 @@ where
     // context for literal/match is plaintext offset modulo 2^pb
     pub pb: u32, // 0..4
     unpacked_size: Option<u64>,
-    literal_probs: Vec<Vec<u16>>,
-    pos_slot_decoder: Vec<rangecoder::BitTree>,
-    align_decoder: rangecoder::BitTree,
+    literal_probs: Vec<Vec<u16, 0x300>, PROBS_MEM_LIMIT>,
+    pos_slot_decoder: Vec<rangecoder::BitTree<64>, 4>,
+    align_decoder: rangecoder::BitTree<16>,
     pos_decoders: [u16; 115],
     is_match: [u16; 192], // true = LZ, false = literal
     is_rep: [u16; 12],
@@ -152,70 +154,69 @@ where
     rep_len_decoder: rangecoder::LenDecoder,
 }
 
-// Initialize decoder with circular buffer
-pub fn new_circular<W>(
-    output: W,
-    params: LzmaParams,
-) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W>>>
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
+    DecoderState<W, lzbuffer::LzCircularBuffer<W, DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>
 where
     W: io::Write,
 {
-    new_circular_with_memlimit(output, params, usize::MAX)
+    pub fn new(output: W, params: LzmaParams) -> error::Result<Self> {
+        let dict_size = params.dict_size as usize;
+        if dict_size > DICT_MEM_LIMIT {
+            return Err(error::Error::DictionaryBufferTooSmall {
+                needed: dict_size,
+                available: DICT_MEM_LIMIT,
+            });
+        }
+        if (1 << (params.lc + params.lp)) > PROBS_MEM_LIMIT {
+            return Err(error::Error::ProbabilitiesBufferTooSmall {
+                needed: 1 << (params.lc + params.lp),
+                available: PROBS_MEM_LIMIT,
+            });
+        }
+        Ok(Self {
+            _phantom: PhantomData,
+            output: lzbuffer::LzCircularBuffer::from_stream(output, dict_size),
+            partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+            lc: params.lc,
+            lp: params.lp,
+            pb: params.pb,
+            unpacked_size: params.unpacked_size,
+            literal_probs: Vec::from_iter(repeat(Vec::from_iter(repeat(0x400)))),
+            pos_slot_decoder: Vec::from_iter(repeat(Default::default())),
+            align_decoder: Default::default(),
+            pos_decoders: [0x400; 115],
+            is_match: [0x400; 192],
+            is_rep: [0x400; 12],
+            is_rep_g0: [0x400; 12],
+            is_rep_g1: [0x400; 12],
+            is_rep_g2: [0x400; 12],
+            is_rep_0long: [0x400; 192],
+            state: 0,
+            rep: [0; 4],
+            len_decoder: Default::default(),
+            rep_len_decoder: Default::default(),
+        })
+    }
 }
 
-// Initialize decoder with circular buffer
-pub fn new_circular_with_memlimit<W>(
-    output: W,
-    params: LzmaParams,
-    memlimit: usize,
-) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W>>>
-where
-    W: io::Write,
-{
-    // Decoder
-    let decoder = DecoderState {
-        _phantom: PhantomData,
-        output: lzbuffer::LzCircularBuffer::from_stream_with_memlimit(
-            output,
-            params.dict_size as usize,
-            memlimit,
-        ),
-        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
-        lc: params.lc,
-        lp: params.lp,
-        pb: params.pb,
-        unpacked_size: params.unpacked_size,
-        literal_probs: vec![vec![0x400; 0x300]; 1 << (params.lc + params.lp)],
-        pos_slot_decoder: vec![rangecoder::BitTree::new(6); 4],
-        align_decoder: rangecoder::BitTree::new(4),
-        pos_decoders: [0x400; 115],
-        is_match: [0x400; 192],
-        is_rep: [0x400; 12],
-        is_rep_g0: [0x400; 12],
-        is_rep_g1: [0x400; 12],
-        is_rep_g2: [0x400; 12],
-        is_rep_0long: [0x400; 192],
-        state: 0,
-        rep: [0; 4],
-        len_decoder: rangecoder::LenDecoder::new(),
-        rep_len_decoder: rangecoder::LenDecoder::new(),
-    };
-
-    Ok(decoder)
-}
-
-impl<W, LZB> DecoderState<W, LZB>
+impl<W, LZB, const PROBS_MEM_LIMIT: usize> DecoderState<W, LZB, PROBS_MEM_LIMIT>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
 {
-    pub fn reset_state(&mut self, lc: u32, lp: u32, pb: u32) {
+    pub fn reset_state(&mut self, lc: u32, lp: u32, pb: u32) -> error::Result<()> {
+        if (1 << (lc + lp)) > (1 << (self.lc + self.lp)) {
+            return Err(error::Error::ProbabilitiesBufferTooSmall {
+                needed: 1 << (lc + lp),
+                available: PROBS_MEM_LIMIT,
+            });
+        }
         self.lc = lc;
         self.lp = lp;
         self.pb = pb;
-        self.literal_probs = vec![vec![0x400; 0x300]; 1 << (lc + lp)];
-        self.pos_slot_decoder = vec![rangecoder::BitTree::new(6); 4];
-        self.align_decoder = rangecoder::BitTree::new(4);
+        self.literal_probs = Vec::from_iter(repeat(Vec::from_iter(repeat(0x400))));
+        self.pos_slot_decoder = Vec::from_iter(repeat(Default::default()));
+        self.align_decoder = Default::default();
         self.pos_decoders = [0x400; 115];
         self.is_match = [0x400; 192];
         self.is_rep = [0x400; 12];
@@ -225,8 +226,9 @@ where
         self.is_rep_0long = [0x400; 192];
         self.state = 0;
         self.rep = [0; 4];
-        self.len_decoder = rangecoder::LenDecoder::new();
-        self.rep_len_decoder = rangecoder::LenDecoder::new();
+        self.len_decoder = Default::default();
+        self.rep_len_decoder = Default::default();
+        Ok(())
     }
 
     pub fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
@@ -383,7 +385,7 @@ where
     /// the decompressor. Needed in streaming mode to avoid corrupting the
     /// state while processing incomplete chunks of data.
     fn try_process_next(&mut self, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
-        let mut temp = std::io::Cursor::new(buf);
+        let mut temp = io::Cursor::new(buf);
         let mut rangecoder = rangecoder::RangeDecoder::from_parts(&mut temp, range, code);
         let _ = self.process_next_inner(&mut rangecoder, false)?;
         Ok(())

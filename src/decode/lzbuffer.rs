@@ -1,5 +1,6 @@
 use crate::error;
 use crate::io;
+use heapless::Vec;
 
 pub trait LzBuffer<W>
 where
@@ -25,29 +26,27 @@ where
 }
 
 // A circular buffer for LZ sequences
-pub struct LzCircularBuffer<W, const SIZE: usize>
+pub struct LzCircularBuffer<W, const MEM_LIMIT: usize>
 where
     W: io::Write,
 {
-    stream: W,          // Output sink
-    buf: Vec<u8, SIZE>, // Circular buffer
-    dict_size: usize,   // Length of the buffer
-    memlimit: usize,    // Buffer memory limit
-    cursor: usize,      // Current position
-    len: usize,         // Total number of bytes sent through the buffer
+    stream: W,               // Output sink
+    buf: Vec<u8, MEM_LIMIT>, // Circular buffer
+    dict_size: usize,        // Length of the buffer
+    cursor: usize,           // Current position
+    len: usize,              // Total number of bytes sent through the buffer
 }
 
-impl<W, const SIZE: usize> LzCircularBuffer<W, SIZE>
+impl<W, const MEM_LIMIT: usize> LzCircularBuffer<W, MEM_LIMIT>
 where
     W: io::Write,
 {
-    pub fn from_stream_with_memlimit(stream: W, dict_size: usize, memlimit: usize) -> Self {
+    pub fn from_stream(stream: W, dict_size: usize) -> Self {
         lzma_info!("Dict size in LZ buffer: {}", dict_size);
         Self {
             stream,
             buf: Vec::new(),
             dict_size,
-            memlimit,
             cursor: 0,
             len: 0,
         }
@@ -61,11 +60,11 @@ where
         let new_len = index + 1;
 
         if self.buf.len() < new_len {
-            if new_len <= self.memlimit {
+            if new_len <= MEM_LIMIT {
                 self.buf.resize(new_len, 0);
             } else {
                 return Err(error::Error::LzmaError(
-                    "exceeded memory limit of {self.memlimit}",
+                    "exceeded memory limit of {MEM_LIMIT}",
                 ));
             }
         }
@@ -74,7 +73,7 @@ where
     }
 }
 
-impl<W> LzBuffer<W> for LzCircularBuffer<W>
+impl<W, const MEM_LIMIT: usize> LzBuffer<W> for LzCircularBuffer<W, MEM_LIMIT>
 where
     W: io::Write,
 {

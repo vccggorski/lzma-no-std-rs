@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use core2::{
     io::{self, Result},
 };

@@ -6,10 +6,6 @@ pub struct Options {
     /// The default is
     /// [`UnpackedSize::ReadFromHeader`](enum.UnpackedSize.html#variant.ReadFromHeader).
     pub unpacked_size: UnpackedSize,
-    /// Defines whether the dictionary's dynamic size should be limited during decompression.
-    ///
-    /// The default is unlimited.
-    pub memlimit: Option<usize>,
     /// Determines whether to bypass end of stream validation.
     ///
     /// This option only applies to the [`Stream`](struct.Stream.html) API.
@@ -53,7 +49,6 @@ mod test {
         assert_eq!(
             Options {
                 unpacked_size: UnpackedSize::ReadFromHeader,
-                memlimit: None,
                 allow_incomplete: false,
             },
             Options::default()

@@ -1,7 +1,6 @@
 //! Error handling.
 
 use crate::io;
-use core::fmt::Display;
 use core::result;
 
 pub mod lzma {
@@ -12,24 +11,23 @@ pub mod lzma {
     }
 }
 
-pub mod xz {
-    #[derive(Debug)]
-    pub enum XzError {
-        SomeError,
-    }
-}
-
 /// Library errors.
 #[derive(Debug)]
 pub enum Error {
+    DictionaryBufferTooSmall {
+        needed: usize,
+        available: usize,
+    },
+    ProbabilitiesBufferTooSmall {
+        needed: usize,
+        available: usize,
+    },
     /// I/O error.
     IoError(io::Error),
     /// Not enough bytes to complete header
     HeaderTooShort(io::Error),
     /// LZMA error.
     LzmaError(&'static str),
-    /// XZ error.
-    XzError(&'static str),
 }
 
 /// Library result alias.
@@ -38,27 +36,6 @@ pub type Result<T> = result::Result<T, Error>;
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::IoError(e)
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Error::IoError(e) => write!(fmt, "io error: {}", e),
-            Error::HeaderTooShort(e) => write!(fmt, "header too short: {}", e),
-            Error::LzmaError(e) => write!(fmt, "lzma error: {:?}", e),
-            Error::XzError(e) => write!(fmt, "xz error: {:?}", e),
-        }
-    }
-}
-
-#[cfg(not(feature = "no_std"))]
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::IoError(e) | Error::HeaderTooShort(e) => Some(e),
-            Error::LzmaError(_) | Error::XzError(_) => None,
-        }
     }
 }
 
