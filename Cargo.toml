@@ -14,9 +14,9 @@ edition = "2018"
 [dependencies]
 byteorder = { version = "^1.0.0", default-features = false }
 crc = { version = "^1.0.0", default-features = false }
-heapless = { version = "^0.7.9" }
 core2 = { version = "^0.3.2", default-features = false }
 log = { version = "^0.4.14", optional = true }
+heapless = "^0.7"
 
 [dev-dependencies]
 rust-lzma = "0.5"

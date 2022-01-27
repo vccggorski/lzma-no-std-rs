@@ -1,28 +1,10 @@
-use crate::allocator::MemoryDispenser;
-#[cfg(feature = "std")]
-use crate::decode::lzbuffer::StdBuffer;
-use crate::decode::lzbuffer::{AbstractBuffer, Buffer, LzBuffer, LzCircularBuffer};
-#[cfg(feature = "std")]
-use crate::decode::lzma::{new_circular, new_circular_with_memlimit, StdDecoderState};
-use crate::decode::lzma::{
-    no_std_new_circular, no_std_new_circular_with_memlimit, AbstractDecoderState, DecoderState,
-    LzmaParams,
-};
+use crate::decode::lzbuffer::{LzBuffer, LzCircularBuffer};
+use crate::decode::lzma::{new_circular, new_circular_with_memlimit, DecoderState, LzmaParams};
 use crate::decode::rangecoder::RangeDecoder;
 use crate::decompress::Options;
-use crate::error;
 use crate::error::Error;
 use core::fmt::Debug;
-use core::marker::PhantomData;
-use core2::io::{self, BufRead, Cursor, Read, Write};
-
-pub mod no_std {
-    use super::*;
-    pub type Stream<'a, W> =
-        super::Stream<'a, W, Buffer<'a>, DecoderState<'a, W, LzCircularBuffer<W, Buffer<'a>>>>;
-
-    unsafe impl<'a, W: Write> core::marker::Send for Stream<'a, W> {}
-}
+use std::io::{self, BufRead, Cursor, Read, Write};
 
 /// Minimum header length to be read.
 /// - props: u8 (1 byte)
@@ -43,52 +25,30 @@ const MAX_TMP_LEN: usize = MAX_HEADER_LEN + START_BYTES;
 
 /// Internal state of this streaming decoder. This is needed because we have to
 /// initialize the stream before processing any data.
-enum State<'a, W, B, ADS>
+#[derive(Debug)]
+enum State<W>
 where
     W: Write,
-    B: AbstractBuffer,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
 {
     /// Stream is initialized but header values have not yet been read.
     Header(W),
-    /// Header values have been read and the stream is ready to process more
-    /// data.
-    Data(RunState<'a, W, B, ADS>),
-}
-
-impl<'a, W, B, ADS> Debug for State<'a, W, B, ADS>
-where
-    W: Write,
-    B: AbstractBuffer,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
-{
-    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
-        use State::*;
-        match self {
-            Data(run_state) => run_state.fmt(fmt),
-            _ => Ok(()),
-        }
-    }
+    /// Header values have been read and the stream is ready to process more data.
+    Data(RunState<W>),
 }
 
 /// Structures needed while decoding data.
-struct RunState<'a, W, B, ADS>
+struct RunState<W>
 where
-    W: Write + 'a,
-    B: AbstractBuffer + 'a,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
+    W: Write,
 {
-    __: (PhantomData<&'a ()>, PhantomData<W>, PhantomData<B>),
-    decoder: ADS,
+    decoder: DecoderState<W, LzCircularBuffer<W>>,
     range: u32,
     code: u32,
 }
 
-impl<'a, W, B, ADS> Debug for RunState<'a, W, B, ADS>
+impl<W> Debug for RunState<W>
 where
     W: Write,
-    B: AbstractBuffer,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
 {
     fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
         fmt.debug_struct("RunState")
@@ -98,84 +58,47 @@ where
     }
 }
 
-impl<'a, W, B, ADS> Debug for Stream<'a, W, B, ADS>
-where
-    W: Write + Debug,
-    B: AbstractBuffer,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
-{
-    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
-        fmt.debug_struct("Stream")
-            .field("tmp", &self.tmp)
-            .field("state", &self.state)
-            .field("options", &self.options)
-            .finish()
-    }
-}
-
-#[derive(Debug)]
-pub enum StreamStatus {
-    ProcessingHeader,
-    ProcessingData {
-        unpacked_data_processed: u64,
-        unpacked_size: Option<u64>,
-    },
-    InvalidState,
-    Finished,
-}
-
 /// Lzma decompressor that can process multiple chunks of data using the
 /// `io::Write` interface.
-pub struct Stream<'a, W, B, ADS>
+pub struct Stream<W>
 where
-    W: Write + 'a,
-    B: AbstractBuffer + 'a,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
+    W: Write,
 {
     /// Temporary buffer to hold data while the header is being read.
     tmp: Cursor<[u8; MAX_TMP_LEN]>,
     /// Whether the stream is initialized and ready to process data.
-    /// An `Option` is used to avoid interior mutability when updating the
-    /// state.
-    state: Option<State<'a, W, B, ADS>>,
+    /// An `Option` is used to avoid interior mutability when updating the state.
+    state: Option<State<W>>,
     /// Options given when a stream is created.
     options: Options,
-    mm: Option<&'a MemoryDispenser<'a>>,
 }
 
-impl<'a, W, B, ADS> Stream<'a, W, B, ADS>
+impl<W> Stream<W>
 where
     W: Write,
-    B: AbstractBuffer,
-    ADS: AbstractDecoderState<'a, W, LzCircularBuffer<W, B>>,
 {
-    pub fn get_stream_status(&self) -> StreamStatus {
-        use State::*;
-        use StreamStatus::*;
-        match &self.state {
-            Some(Header(_)) => ProcessingHeader,
-            Some(Data(run_state)) => {
-                let unpacked_size = *run_state.decoder.unpacked_size();
-                let unpacked_data_processed =
-                    run_state.decoder.output().len() as u64 + self.tmp.position();
-                if let Some(unpacked_size) = unpacked_size {
-                    if unpacked_size == unpacked_data_processed {
-                        return Finished;
-                    }
-                }
-                ProcessingData {
-                    unpacked_size,
-                    unpacked_data_processed,
-                }
-            }
-            None => InvalidState,
+    /// Initialize the stream. This will consume the `output` which is the sink
+    /// implementing `io::Write` that will receive decompressed bytes.
+    pub fn new(output: W) -> Self {
+        Self::new_with_options(&Options::default(), output)
+    }
+
+    /// Initialize the stream with the given `options`. This will consume the
+    /// `output` which is the sink implementing `io::Write` that will
+    /// receive decompressed bytes.
+    pub fn new_with_options(options: &Options, output: W) -> Self {
+        Self {
+            tmp: Cursor::new([0; MAX_TMP_LEN]),
+            state: Some(State::Header(output)),
+            options: *options,
         }
     }
+
     /// Get a reference to the output sink
     pub fn get_output(&self) -> Option<&W> {
         self.state.as_ref().map(|state| match state {
             State::Header(output) => &output,
-            State::Data(state) => state.decoder.output().get_output(),
+            State::Data(state) => state.decoder.output.get_output(),
         })
     }
 
@@ -183,7 +106,7 @@ where
     pub fn get_output_mut(&mut self) -> Option<&mut W> {
         self.state.as_mut().map(|state| match state {
             State::Header(output) => output,
-            State::Data(state) => state.decoder.output_mut().get_output_mut(),
+            State::Data(state) => state.decoder.output.get_output_mut(),
         })
     }
 
@@ -209,7 +132,7 @@ where
                             RangeDecoder::from_parts(&mut stream, state.range, state.code);
                         state.decoder.process(&mut range_decoder)?;
                     }
-                    let output = state.decoder.into_output().finish()?;
+                    let output = state.decoder.output.finish()?;
                     Ok(output)
                 }
             }
@@ -221,11 +144,46 @@ where
         }
     }
 
-    /// Process compressed data
-    fn read_data<R: BufRead>(
-        mut state: RunState<'a, W, B, ADS>,
+    /// Attempts to read the header and transition into a running state.
+    ///
+    /// This function will consume the state, returning the next state on both
+    /// error and success.
+    fn read_header<R: BufRead>(
+        output: W,
         mut input: &mut R,
-    ) -> io::Result<RunState<'a, W, B, ADS>> {
+        options: &Options,
+    ) -> crate::error::Result<State<W>> {
+        match LzmaParams::read_header(&mut input, options) {
+            Ok(params) => {
+                let decoder = if let Some(memlimit) = options.memlimit {
+                    new_circular_with_memlimit(output, params, memlimit)
+                } else {
+                    new_circular(output, params)
+                }?;
+
+                // The RangeDecoder is only kept temporarily as we are processing
+                // chunks of data.
+                if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
+                    Ok(State::Data(RunState {
+                        decoder,
+                        range: rangecoder.range,
+                        code: rangecoder.code,
+                    }))
+                } else {
+                    // Failed to create a RangeDecoder because we need more data,
+                    // try again later.
+                    Ok(State::Header(decoder.output.into_output()))
+                }
+            }
+            // Failed to read_header() because we need more data, try again later.
+            Err(Error::HeaderTooShort(_)) => Ok(State::Header(output)),
+            // Fatal error. Don't retry.
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Process compressed data
+    fn read_data<R: BufRead>(mut state: RunState<W>, mut input: &mut R) -> io::Result<RunState<W>> {
         // Construct our RangeDecoder from the previous range and code
         // values.
         let mut rangecoder = RangeDecoder::from_parts(&mut input, state.range, state.code);
@@ -237,7 +195,6 @@ where
             .map_err(|e| -> io::Error { e.into() })?;
 
         Ok(RunState {
-            __: Default::default(),
             decoder: state.decoder,
             range: rangecoder.range,
             code: rangecoder.code,
@@ -245,142 +202,20 @@ where
     }
 }
 
-#[cfg(feature = "std")]
-impl<'a, W> Stream<'a, W, StdBuffer, StdDecoderState<W, LzCircularBuffer<W, StdBuffer>>>
+impl<W> Debug for Stream<W>
 where
-    W: Write,
+    W: Write + Debug,
 {
-    /// Initialize the stream. This will consume the `output` which is the sink
-    /// implementing `io::Write` that will receive decompressed bytes.
-    pub fn new(output: W) -> Self {
-        Self::new_with_options(&Options::default(), output)
-    }
-
-    /// Initialize the stream with the given `options`. This will consume the
-    /// `output` which is the sink implementing `io::Write` that will
-    /// receive decompressed bytes.
-    pub fn new_with_options(options: &Options, output: W) -> Self {
-        Self {
-            tmp: Cursor::new([0; MAX_TMP_LEN]),
-            state: Some(State::Header(output)),
-            options: *options,
-            mm: None,
-        }
-    }
-
-    /// Attempts to read the header and transition into a running state.
-    ///
-    /// This function will consume the state, returning the next state on both
-    /// error and success.
-    fn read_header<R: BufRead>(
-        output: W,
-        mut input: &mut R,
-        options: &Options,
-    ) -> crate::error::Result<
-        State<'a, W, StdBuffer, StdDecoderState<W, LzCircularBuffer<W, StdBuffer>>>,
-    > {
-        match LzmaParams::read_header(&mut input, options) {
-            Ok(params) => {
-                // The RangeDecoder is only kept temporarily as we are processing
-                // chunks of data.
-                if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
-                    let decoder = if let Some(memlimit) = options.memlimit {
-                        new_circular_with_memlimit(output, params, memlimit)
-                    } else {
-                        new_circular(output, params)
-                    }?;
-
-                    Ok(State::Data(RunState {
-                        __: Default::default(),
-                        decoder,
-                        range: rangecoder.range,
-                        code: rangecoder.code,
-                    }))
-                } else {
-                    // Failed to create a RangeDecoder because we need more data,
-                    // try again later.
-                    Ok(State::Header(output))
-                }
-            }
-            // Failed to read_header() because we need more data, try again later.
-            Err(Error::HeaderTooShort(_)) => Ok(State::Header(output)),
-            // Fatal error. Don't retry.
-            Err(e) => Err(e),
-        }
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+        fmt.debug_struct("Stream")
+            .field("tmp", &self.tmp.position())
+            .field("state", &self.state)
+            .field("options", &self.options)
+            .finish()
     }
 }
 
-impl<'a, W> Stream<'a, W, Buffer<'a>, DecoderState<'a, W, LzCircularBuffer<W, Buffer<'a>>>>
-where
-    W: Write,
-{
-    /// Initialize the stream. This will consume the `output` which is the sink
-    /// implementing `io::Write` that will receive decompressed bytes.
-    pub fn no_std_new(mm: &'a MemoryDispenser<'a>, output: W) -> Self {
-        Self::no_std_new_with_options(mm, &Options::default(), output)
-    }
-
-    /// Initialize the stream with the given `options`. This will consume the
-    /// `output` which is the sink implementing `io::Write` that will
-    /// receive decompressed bytes.
-    pub fn no_std_new_with_options(
-        mm: &'a MemoryDispenser<'a>,
-        options: &Options,
-        output: W,
-    ) -> Self {
-        Self {
-            tmp: Cursor::new([0; MAX_TMP_LEN]),
-            state: Some(State::Header(output)),
-            options: *options,
-            mm: Some(mm),
-        }
-    }
-
-    /// Attempts to read the header and transition into a running state.
-    ///
-    /// This function will consume the state, returning the next state on both
-    /// error and success.
-    fn no_std_read_header<R: BufRead>(
-        mm: &'a MemoryDispenser<'a>,
-        output: W,
-        mut input: &mut R,
-        options: &Options,
-    ) -> crate::error::Result<
-        State<'a, W, Buffer<'a>, DecoderState<'a, W, LzCircularBuffer<W, Buffer<'a>>>>,
-    > {
-        match LzmaParams::read_header(&mut input, options) {
-            Ok(params) => {
-                // The RangeDecoder is only kept temporarily as we are processing
-                // chunks of data.
-                if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
-                    let decoder = if let Some(memlimit) = options.memlimit {
-                        no_std_new_circular_with_memlimit(mm, output, params, memlimit)
-                    } else {
-                        no_std_new_circular(mm, output, params)
-                    }?;
-
-                    Ok(State::Data(RunState {
-                        __: Default::default(),
-                        decoder,
-                        range: rangecoder.range,
-                        code: rangecoder.code,
-                    }))
-                } else {
-                    // Failed to create a RangeDecoder because we need more data,
-                    // try again later.
-                    Ok(State::Header(output))
-                }
-            }
-            // Failed to read_header() because we need more data, try again later.
-            Err(Error::HeaderTooShort(_)) => Ok(State::Header(output)),
-            // Fatal error. Don't retry.
-            Err(e) => Err(e),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'a, W> Write for Stream<'a, W, StdBuffer, StdDecoderState<W, LzCircularBuffer<W, StdBuffer>>>
+impl<W> Write for Stream<W>
 where
     W: Write,
 {
@@ -396,7 +231,7 @@ where
                         let position = self.tmp.position();
                         let bytes_read =
                             input.read(&mut self.tmp.get_mut()[position as usize..])?;
-                        let bytes_read = if bytes_read < core::u64::MAX as usize {
+                        let bytes_read = if bytes_read < std::u64::MAX as usize {
                             bytes_read as u64
                         } else {
                             return Err(io::Error::new(
@@ -437,7 +272,7 @@ where
                                 // reset the cursor because we may have partial reads
                                 input.set_position(0);
                                 let bytes_read = input.read(&mut self.tmp.get_mut()[..])?;
-                                let bytes_read = if bytes_read < core::u64::MAX as usize {
+                                let bytes_read = if bytes_read < std::u64::MAX as usize {
                                     bytes_read as u64
                                 } else {
                                     return Err(io::Error::new(
@@ -462,7 +297,6 @@ where
                                 Error::LzmaError(e) | Error::XzError(e) => {
                                     io::Error::new(io::ErrorKind::Other, e)
                                 }
-                                Error::OutOfMemory(_) => unreachable!("TODO"),
                             });
                         }
                     }
@@ -494,140 +328,7 @@ where
         if let Some(ref mut state) = self.state {
             match state {
                 State::Header(_) => Ok(()),
-                State::Data(state) => state.decoder.output_mut().get_output_mut().flush(),
-            }
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl<'a, W> Write
-    for Stream<'a, W, Buffer<'a>, DecoderState<'a, W, LzCircularBuffer<W, Buffer<'a>>>>
-where
-    W: Write,
-{
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        let mut input = Cursor::new(data);
-
-        if let Some(state) = self.state.take() {
-            let state = match state {
-                // Read the header values and transition into a running state.
-                State::Header(state) => {
-                    let res = if self.tmp.position() > 0 {
-                        // attempt to fill the tmp buffer
-                        let position = self.tmp.position();
-                        let bytes_read =
-                            input.read(&mut self.tmp.get_mut()[position as usize..])?;
-                        let bytes_read = if bytes_read < core::u64::MAX as usize {
-                            bytes_read as u64
-                        } else {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "Failed to convert integer to u64.",
-                            ));
-                        };
-                        self.tmp.set_position(position + bytes_read);
-
-                        // attempt to read the header from our tmp buffer
-                        let (position, res) = {
-                            let mut tmp_input =
-                                Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                            let res = Stream::no_std_read_header(
-                                self.mm.unwrap_or_else(|| panic!()),
-                                state,
-                                &mut tmp_input,
-                                &self.options,
-                            );
-                            (tmp_input.position(), res)
-                        };
-
-                        // discard all bytes up to position if reading the header
-                        // was successful
-                        if let Ok(State::Data(_)) = &res {
-                            let tmp = *self.tmp.get_ref();
-                            let end = self.tmp.position();
-                            let new_len = end - position;
-                            (&mut self.tmp.get_mut()[0..new_len as usize])
-                                .copy_from_slice(&tmp[position as usize..end as usize]);
-                            self.tmp.set_position(new_len);
-                        }
-                        res
-                    } else {
-                        Stream::no_std_read_header(
-                            self.mm.unwrap_or_else(|| panic!()),
-                            state,
-                            &mut input,
-                            &self.options,
-                        )
-                    };
-
-                    match res {
-                        // occurs when not enough input bytes were provided to
-                        // read the entire header
-                        Ok(State::Header(val)) => {
-                            if self.tmp.position() == 0 {
-                                // reset the cursor because we may have partial reads
-                                input.set_position(0);
-                                let bytes_read = input.read(&mut self.tmp.get_mut()[..])?;
-                                let bytes_read = if bytes_read < core::u64::MAX as usize {
-                                    bytes_read as u64
-                                } else {
-                                    return Err(io::Error::new(
-                                        io::ErrorKind::Other,
-                                        "Failed to convert integer to u64.",
-                                    ));
-                                };
-                                self.tmp.set_position(bytes_read);
-                            }
-                            State::Header(val)
-                        }
-
-                        // occurs when the header was successfully read and we
-                        // move on to the next state
-                        Ok(State::Data(val)) => State::Data(val),
-
-                        // occurs when the output was consumed due to a
-                        // non-recoverable error
-                        Err(e) => {
-                            return Err(match e {
-                                Error::IoError(e) | Error::HeaderTooShort(e) => e,
-                                Error::LzmaError(e) | Error::XzError(e) => {
-                                    io::Error::new(io::ErrorKind::Other, e)
-                                }
-                                Error::OutOfMemory(_) => unreachable!("TODO"),
-                            });
-                        }
-                    }
-                }
-
-                // Process another chunk of data.
-                State::Data(state) => {
-                    let state = if self.tmp.position() > 0 {
-                        let mut tmp_input =
-                            Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                        let res = Stream::read_data(state, &mut tmp_input)?;
-                        self.tmp.set_position(0);
-                        res
-                    } else {
-                        state
-                    };
-                    State::Data(Stream::read_data(state, &mut input)?)
-                }
-            };
-            self.state.replace(state);
-        }
-        Ok(input.position() as usize)
-    }
-
-    /// Flushes the output sink. The internal buffer isn't flushed to avoid
-    /// corrupting the internal state. Instead, call `finish()` to finalize the
-    /// stream and flush all remaining internal data.
-    fn flush(&mut self) -> io::Result<()> {
-        if let Some(ref mut state) = self.state {
-            match state {
-                State::Header(_) => Ok(()),
-                State::Data(state) => state.decoder.output_mut().get_output_mut().flush(),
+                State::Data(state) => state.decoder.output.get_output_mut().flush(),
             }
         } else {
             Ok(())
@@ -637,7 +338,7 @@ where
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, "{error:?}")
+        io::Error::new("{error:?}")
     }
 }
 
@@ -744,7 +445,7 @@ mod test {
                 let mut consumed = 0;
                 let mut stream = Stream::new(Vec::new());
                 while consumed < input.len() {
-                    let end = core::cmp::min(consumed + chunk, input.len());
+                    let end = std::cmp::min(consumed + chunk, input.len());
                     stream.write_all(&input[consumed..end]).unwrap();
                     consumed = end;
                 }

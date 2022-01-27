@@ -1,9 +1,8 @@
 //! Error handling.
 
+use crate::io;
 use core::fmt::Display;
-use core2::io;
 use core::result;
-use crate::allocator;
 
 pub mod lzma {
     #[derive(Debug)]
@@ -23,7 +22,6 @@ pub mod xz {
 /// Library errors.
 #[derive(Debug)]
 pub enum Error {
-    OutOfMemory(allocator::OutOfMemory),
     /// I/O error.
     IoError(io::Error),
     /// Not enough bytes to complete header
@@ -38,31 +36,28 @@ pub enum Error {
 pub type Result<T> = result::Result<T, Error>;
 
 impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
+    fn from(e: io::Error) -> Error {
         Error::IoError(e)
-    }
-}
-
-impl From<allocator::OutOfMemory> for Error {
-    fn from(e: allocator::OutOfMemory) -> Self {
-        Error::OutOfMemory(e)
-    }
-}
-
-impl From<core::convert::Infallible> for Error {
-    fn from(e: core::convert::Infallible) -> Self {
-        unreachable!();
     }
 }
 
 impl Display for Error {
     fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Error::OutOfMemory(e) => write!(fmt, "oom error: {:?}", e),
             Error::IoError(e) => write!(fmt, "io error: {}", e),
             Error::HeaderTooShort(e) => write!(fmt, "header too short: {}", e),
             Error::LzmaError(e) => write!(fmt, "lzma error: {:?}", e),
             Error::XzError(e) => write!(fmt, "xz error: {:?}", e),
+        }
+    }
+}
+
+#[cfg(not(feature = "no_std"))]
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::IoError(e) | Error::HeaderTooShort(e) => Some(e),
+            Error::LzmaError(_) | Error::XzError(_) => None,
         }
     }
 }

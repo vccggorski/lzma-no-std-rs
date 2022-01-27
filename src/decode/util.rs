@@ -1,7 +1,6 @@
 use core::hash;
-use core2::io;
+use crate::io;
 
-#[cfg(feature = "std")]
 pub fn read_tag<R: io::BufRead>(input: &mut R, tag: &[u8]) -> io::Result<bool> {
     let mut buf = vec![0; tag.len()];
     input.read_exact(buf.as_mut_slice())?;

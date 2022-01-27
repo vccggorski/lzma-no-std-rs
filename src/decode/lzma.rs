@@ -1,18 +1,13 @@
-use crate::allocator::Allocator;
 use crate::decode::lzbuffer;
 use crate::decode::rangecoder;
-use crate::decode::rangecoder::AbstractBitTree;
-use crate::decode::rangecoder::AbstractLenDecoder;
-use crate::error;
-use crate::io_ext::ReadBytesExt;
-use byteorder::LittleEndian;
-use core::iter::repeat;
-use core::iter::FromIterator;
-use core::marker::PhantomData;
-use core2::io;
-
 use crate::decompress::Options;
 use crate::decompress::UnpackedSize;
+use crate::error;
+use crate::io;
+use byteorder::LittleEndian;
+use core::marker::PhantomData;
+use io::ReadBytesExt;
+use heapless::Vec;
 
 /// Maximum input data that can be processed in one iteration.
 /// Libhtp uses the following equation to define the maximum number of bits
@@ -25,7 +20,7 @@ const MAX_REQUIRED_INPUT: usize = 20;
 /// Tells the decompressor if we should expect more data after parsing the
 /// current input.
 #[derive(Debug, PartialEq)]
-pub enum ProcessingMode {
+enum ProcessingMode {
     /// Streaming mode. Process the input bytes but assume there will be more
     /// chunks of input data to receive in future calls to `process_mode()`.
     Partial,
@@ -40,7 +35,7 @@ pub enum ProcessingMode {
 ///
 /// Indicates whether processing should continue or is finished.
 #[derive(Debug, PartialEq)]
-pub enum ProcessingStatus {
+enum ProcessingStatus {
     Continue,
     Finished,
 }
@@ -125,199 +120,7 @@ impl LzmaParams {
     }
 }
 
-#[cfg(feature = "std")]
-impl<'a, W, LZB> AbstractDecoderState<'a, W, LZB> for StdDecoderState<W, LZB>
-where
-    W: io::Write,
-    LZB: lzbuffer::LzBuffer<W> + 'a,
-{
-    type BitTree = rangecoder::StdBitTree;
-    type LenDecoder = rangecoder::StdLenDecoder;
-
-    fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
-        &mut self.partial_input_buf
-    }
-    fn into_output(self) -> LZB {
-        self.output
-    }
-    fn output(&self) -> &LZB {
-        &self.output
-    }
-    fn output_mut(&mut self) -> &mut LZB {
-        &mut self.output
-    }
-    fn lc(&self) -> u32 {
-        self.lc
-    }
-    fn lp(&self) -> u32 {
-        self.lp
-    }
-    fn pb(&self) -> u32 {
-        self.pb
-    }
-    fn unpacked_size(&self) -> &Option<u64> {
-        &self.unpacked_size
-    }
-    fn unpacked_size_mut(&mut self) -> &mut Option<u64> {
-        &mut self.unpacked_size
-    }
-    fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>] {
-        &mut self.literal_probs
-    }
-    fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree] {
-        &mut self.pos_slot_decoder
-    }
-    fn align_decoder(&mut self) -> &mut Self::BitTree {
-        &mut self.align_decoder
-    }
-    fn pos_decoders(&mut self) -> &mut [u16] {
-        &mut self.pos_decoders
-    }
-    fn is_match(&mut self) -> &mut [u16] {
-        &mut self.is_match
-    }
-    fn is_rep(&mut self) -> &mut [u16] {
-        &mut self.is_rep
-    }
-    fn is_rep_g0(&mut self) -> &mut [u16] {
-        &mut self.is_rep_g0
-    }
-    fn is_rep_g1(&mut self) -> &mut [u16] {
-        &mut self.is_rep_g1
-    }
-    fn is_rep_g2(&mut self) -> &mut [u16] {
-        &mut self.is_rep_g2
-    }
-    fn is_rep_0long(&mut self) -> &mut [u16] {
-        &mut self.is_rep_0long
-    }
-    fn state(&mut self) -> &mut usize {
-        &mut self.state
-    }
-    fn rep(&mut self) -> &mut [usize] {
-        &mut self.rep
-    }
-    fn len_decoder(&mut self) -> &mut Self::LenDecoder {
-        &mut self.len_decoder
-    }
-    fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder {
-        &mut self.rep_len_decoder
-    }
-}
-
-#[cfg(feature = "std")]
-pub struct StdDecoderState<W, LZB>
-where
-    W: io::Write,
-    LZB: lzbuffer::LzBuffer<W>,
-{
-    _phantom: PhantomData<W>,
-    // Buffer input data here if we need more for decompression. Up to
-    // MAX_REQUIRED_INPUT bytes can be consumed during one iteration.
-    partial_input_buf: std::io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
-    pub output: LZB,
-    // most lc significant bits of previous byte are part of the literal context
-    pub lc: u32, // 0..8
-    pub lp: u32, // 0..4
-    // context for literal/match is plaintext offset modulo 2^pb
-    pub pb: u32, // 0..4
-    unpacked_size: Option<u64>,
-    literal_probs: Vec<heapless::Vec<u16, 0x300>>,
-    pos_slot_decoder: Vec<rangecoder::StdBitTree>,
-    align_decoder: rangecoder::StdBitTree,
-    pos_decoders: [u16; 115],
-    is_match: [u16; 192], // true = LZ, false = literal
-    is_rep: [u16; 12],
-    is_rep_g0: [u16; 12],
-    is_rep_g1: [u16; 12],
-    is_rep_g2: [u16; 12],
-    is_rep_0long: [u16; 192],
-    state: usize,
-    rep: [usize; 4],
-    len_decoder: rangecoder::StdLenDecoder,
-    rep_len_decoder: rangecoder::StdLenDecoder,
-}
-
-impl<'a, W, LZB> AbstractDecoderState<'a, W, LZB> for DecoderState<'a, W, LZB>
-where
-    W: io::Write,
-    LZB: lzbuffer::LzBuffer<W> + 'a,
-{
-    type BitTree = rangecoder::BitTree<'a>;
-    type LenDecoder = rangecoder::LenDecoder<'a>;
-
-    fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]> {
-        &mut self.partial_input_buf
-    }
-    fn into_output(self) -> LZB {
-        self.output
-    }
-    fn output(&self) -> &LZB {
-        &self.output
-    }
-    fn output_mut(&mut self) -> &mut LZB {
-        &mut self.output
-    }
-    fn lc(&self) -> u32 {
-        self.lc
-    }
-    fn lp(&self) -> u32 {
-        self.lp
-    }
-    fn pb(&self) -> u32 {
-        self.pb
-    }
-    fn unpacked_size(&self) -> &Option<u64> {
-        &self.unpacked_size
-    }
-    fn unpacked_size_mut(&mut self) -> &mut Option<u64> {
-        &mut self.unpacked_size
-    }
-    fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>] {
-        &mut self.literal_probs
-    }
-    fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree] {
-        &mut self.pos_slot_decoder
-    }
-    fn align_decoder(&mut self) -> &mut Self::BitTree {
-        &mut self.align_decoder
-    }
-    fn pos_decoders(&mut self) -> &mut [u16] {
-        &mut self.pos_decoders
-    }
-    fn is_match(&mut self) -> &mut [u16] {
-        &mut self.is_match
-    }
-    fn is_rep(&mut self) -> &mut [u16] {
-        &mut self.is_rep
-    }
-    fn is_rep_g0(&mut self) -> &mut [u16] {
-        &mut self.is_rep_g0
-    }
-    fn is_rep_g1(&mut self) -> &mut [u16] {
-        &mut self.is_rep_g1
-    }
-    fn is_rep_g2(&mut self) -> &mut [u16] {
-        &mut self.is_rep_g2
-    }
-    fn is_rep_0long(&mut self) -> &mut [u16] {
-        &mut self.is_rep_0long
-    }
-    fn state(&mut self) -> &mut usize {
-        &mut self.state
-    }
-    fn rep(&mut self) -> &mut [usize] {
-        &mut self.rep
-    }
-    fn len_decoder(&mut self) -> &mut Self::LenDecoder {
-        &mut self.len_decoder
-    }
-    fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder {
-        &mut self.rep_len_decoder
-    }
-}
-
-pub struct DecoderState<'a, W, LZB>
+pub struct DecoderState<W, LZB>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
@@ -333,101 +136,58 @@ where
     // context for literal/match is plaintext offset modulo 2^pb
     pub pb: u32, // 0..4
     unpacked_size: Option<u64>,
-    literal_probs: &'a mut [heapless::Vec<u16, 0x300>],
-    pos_slot_decoder: &'a mut [rangecoder::BitTree<'a>],
-    align_decoder: rangecoder::BitTree<'a>,
-    pos_decoders: &'a mut [u16],
-    is_match: &'a mut [u16], // true = LZ, false = literal
-    is_rep: &'a mut [u16],
-    is_rep_g0: &'a mut [u16],
-    is_rep_g1: &'a mut [u16],
-    is_rep_g2: &'a mut [u16],
-    is_rep_0long: &'a mut [u16],
+    literal_probs: Vec<Vec<u16>>,
+    pos_slot_decoder: Vec<rangecoder::BitTree>,
+    align_decoder: rangecoder::BitTree,
+    pos_decoders: [u16; 115],
+    is_match: [u16; 192], // true = LZ, false = literal
+    is_rep: [u16; 12],
+    is_rep_g0: [u16; 12],
+    is_rep_g1: [u16; 12],
+    is_rep_g2: [u16; 12],
+    is_rep_0long: [u16; 192],
     state: usize,
     rep: [usize; 4],
-    len_decoder: rangecoder::LenDecoder<'a>,
-    rep_len_decoder: rangecoder::LenDecoder<'a>,
+    len_decoder: rangecoder::LenDecoder,
+    rep_len_decoder: rangecoder::LenDecoder,
 }
 
-#[cfg(feature = "std")]
-// Initialize decoder with accumulating buffer
-pub fn new_accum<W>(
-    output: lzbuffer::LzAccumBuffer<W>,
-    lc: u32,
-    lp: u32,
-    pb: u32,
-    unpacked_size: Option<u64>,
-) -> StdDecoderState<W, lzbuffer::LzAccumBuffer<W>>
-where
-    W: io::Write,
-{
-    StdDecoderState {
-        _phantom: PhantomData,
-        partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
-        output,
-        lc,
-        lp,
-        pb,
-        unpacked_size,
-        literal_probs: vec![heapless::Vec::from_iter(repeat(0x400).take(0x300)); 1 << (lc + lp)],
-        pos_slot_decoder: vec![rangecoder::StdBitTree::new(6); 4],
-        align_decoder: rangecoder::StdBitTree::new(4),
-        pos_decoders: [0x400; 115],
-        is_match: [0x400; 192],
-        is_rep: [0x400; 12],
-        is_rep_g0: [0x400; 12],
-        is_rep_g1: [0x400; 12],
-        is_rep_g2: [0x400; 12],
-        is_rep_0long: [0x400; 192],
-        state: 0,
-        rep: [0; 4],
-        len_decoder: rangecoder::StdLenDecoder::new(),
-        rep_len_decoder: rangecoder::StdLenDecoder::new(),
-    }
-}
-
-#[cfg(feature = "std")]
 // Initialize decoder with circular buffer
 pub fn new_circular<W>(
     output: W,
     params: LzmaParams,
-) -> error::Result<StdDecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::StdBuffer>>>
+) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W>>>
 where
     W: io::Write,
 {
-    let dict_size = params.dict_size;
-    new_circular_with_memlimit(output, params, dict_size as usize)
+    new_circular_with_memlimit(output, params, usize::MAX)
 }
 
-#[cfg(feature = "std")]
 // Initialize decoder with circular buffer
 pub fn new_circular_with_memlimit<W>(
     output: W,
     params: LzmaParams,
     memlimit: usize,
-) -> error::Result<StdDecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::StdBuffer>>>
+) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W>>>
 where
     W: io::Write,
 {
     // Decoder
-    let decoder = StdDecoderState {
+    let decoder = DecoderState {
         _phantom: PhantomData,
         output: lzbuffer::LzCircularBuffer::from_stream_with_memlimit(
             output,
             params.dict_size as usize,
             memlimit,
         ),
-        partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
+        partial_input_buf: std::io::Cursor::new([0; MAX_REQUIRED_INPUT]),
         lc: params.lc,
         lp: params.lp,
         pb: params.pb,
         unpacked_size: params.unpacked_size,
-        literal_probs: vec![
-            heapless::Vec::from_iter(repeat(0x400).take(0x300));
-            1 << (params.lc + params.lp)
-        ],
-        pos_slot_decoder: vec![rangecoder::StdBitTree::new(6); 4],
-        align_decoder: rangecoder::StdBitTree::new(4),
+        literal_probs: vec![vec![0x400; 0x300]; 1 << (params.lc + params.lp)],
+        pos_slot_decoder: vec![rangecoder::BitTree::new(6); 4],
+        align_decoder: rangecoder::BitTree::new(4),
         pos_decoders: [0x400; 115],
         is_match: [0x400; 192],
         is_rep: [0x400; 12],
@@ -437,77 +197,14 @@ where
         is_rep_0long: [0x400; 192],
         state: 0,
         rep: [0; 4],
-        len_decoder: rangecoder::StdLenDecoder::new(),
-        rep_len_decoder: rangecoder::StdLenDecoder::new(),
+        len_decoder: rangecoder::LenDecoder::new(),
+        rep_len_decoder: rangecoder::LenDecoder::new(),
     };
 
     Ok(decoder)
 }
 
-// Initialize decoder with circular buffer
-pub fn no_std_new_circular<A, W>(
-    mm: &A,
-    output: W,
-    params: LzmaParams,
-) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::Buffer>>>
-where
-    A: Allocator,
-    error::Error: From<A::Error>,
-    W: io::Write,
-{
-    let dict_size = params.dict_size;
-    no_std_new_circular_with_memlimit(mm, output, params, dict_size as usize)
-}
-
-// Initialize decoder with circular buffer
-pub fn no_std_new_circular_with_memlimit<A, W>(
-    mm: &A,
-    output: W,
-    params: LzmaParams,
-    memlimit: usize,
-) -> error::Result<DecoderState<W, lzbuffer::LzCircularBuffer<W, lzbuffer::Buffer>>>
-where
-    A: Allocator,
-    error::Error: From<A::Error>,
-    W: io::Write,
-{
-    // Decoder
-    let decoder = DecoderState {
-        _phantom: PhantomData,
-        output: lzbuffer::LzCircularBuffer::no_std_from_stream_with_memlimit(
-            mm,
-            output,
-            params.dict_size as usize,
-            memlimit,
-        )?,
-        partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
-        lc: params.lc,
-        lp: params.lp,
-        pb: params.pb,
-        unpacked_size: params.unpacked_size,
-        literal_probs: mm.allocate(1 << (params.lc + params.lp), || {
-            Ok(heapless::Vec::from_iter(repeat(0x400).take(0x300)))
-        })?,
-        pos_slot_decoder: mm.allocate(4, || rangecoder::BitTree::new(mm, 6))?,
-        align_decoder: rangecoder::BitTree::new(mm, 4)?,
-        pos_decoders: mm.allocate(115, || Ok(0x400))?,
-        is_match: mm.allocate(192, || Ok(0x400))?,
-        is_rep: mm.allocate(12, || Ok(0x400))?,
-        is_rep_g0: mm.allocate(12, || Ok(0x400))?,
-        is_rep_g1: mm.allocate(12, || Ok(0x400))?,
-        is_rep_g2: mm.allocate(12, || Ok(0x400))?,
-        is_rep_0long: mm.allocate(192, || Ok(0x400))?,
-        state: 0,
-        rep: [0; 4],
-        len_decoder: rangecoder::LenDecoder::new(mm)?,
-        rep_len_decoder: rangecoder::LenDecoder::new(mm)?,
-    };
-
-    Ok(decoder)
-}
-
-#[cfg(feature = "std")]
-impl<W, LZB> StdDecoderState<W, LZB>
+impl<W, LZB> DecoderState<W, LZB>
 where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
@@ -516,10 +213,9 @@ where
         self.lc = lc;
         self.lp = lp;
         self.pb = pb;
-        self.literal_probs =
-            vec![heapless::Vec::from_iter(repeat(0x400).take(0x300)); 1 << (lc + lp)];
-        self.pos_slot_decoder = vec![rangecoder::StdBitTree::new(6); 4];
-        self.align_decoder = rangecoder::StdBitTree::new(4);
+        self.literal_probs = vec![vec![0x400; 0x300]; 1 << (lc + lp)];
+        self.pos_slot_decoder = vec![rangecoder::BitTree::new(6); 4];
+        self.align_decoder = rangecoder::BitTree::new(4);
         self.pos_decoders = [0x400; 115];
         self.is_match = [0x400; 192];
         self.is_rep = [0x400; 12];
@@ -529,57 +225,25 @@ where
         self.is_rep_0long = [0x400; 192];
         self.state = 0;
         self.rep = [0; 4];
-        self.len_decoder = rangecoder::StdLenDecoder::new();
-        self.rep_len_decoder = rangecoder::StdLenDecoder::new();
-    }
-}
-
-pub trait AbstractDecoderState<'a, W, LZB>
-where
-    W: io::Write,
-    LZB: lzbuffer::LzBuffer<W> + 'a,
-{
-    type BitTree: rangecoder::AbstractBitTree;
-    type LenDecoder: rangecoder::AbstractLenDecoder;
-    fn partial_input_buf(&mut self) -> &mut io::Cursor<[u8; MAX_REQUIRED_INPUT]>;
-    fn into_output(self) -> LZB;
-    fn output(&self) -> &LZB;
-    fn output_mut(&mut self) -> &mut LZB;
-    fn lc(&self) -> u32;
-    fn lp(&self) -> u32;
-    fn pb(&self) -> u32;
-    fn unpacked_size(&self) -> &Option<u64>;
-    fn unpacked_size_mut(&mut self) -> &mut Option<u64>;
-    fn literal_probs(&mut self) -> &mut [heapless::Vec<u16, 0x300>];
-    fn pos_slot_decoder(&mut self) -> &mut [Self::BitTree];
-    fn align_decoder(&mut self) -> &mut Self::BitTree;
-    fn pos_decoders(&mut self) -> &mut [u16];
-    fn is_match(&mut self) -> &mut [u16];
-    fn is_rep(&mut self) -> &mut [u16];
-    fn is_rep_g0(&mut self) -> &mut [u16];
-    fn is_rep_g1(&mut self) -> &mut [u16];
-    fn is_rep_g2(&mut self) -> &mut [u16];
-    fn is_rep_0long(&mut self) -> &mut [u16];
-    fn state(&mut self) -> &mut usize;
-    fn rep(&mut self) -> &mut [usize];
-    fn len_decoder(&mut self) -> &mut Self::LenDecoder;
-    fn rep_len_decoder(&mut self) -> &mut Self::LenDecoder;
-
-    fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
-        *self.unpacked_size_mut() = unpacked_size;
+        self.len_decoder = rangecoder::LenDecoder::new();
+        self.rep_len_decoder = rangecoder::LenDecoder::new();
     }
 
-    fn process<'b, R: io::BufRead>(
+    pub fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
+        self.unpacked_size = unpacked_size;
+    }
+
+    pub fn process<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<()> {
         self.process_mode(rangecoder, ProcessingMode::Finish)
     }
 
     #[cfg(feature = "stream")]
-    fn process_stream<'b, R: io::BufRead>(
+    pub fn process_stream<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<()> {
         self.process_mode(rangecoder, ProcessingMode::Partial)
     }
@@ -590,32 +254,31 @@ where
     ///
     /// Returns `ProcessingStatus` to determine whether one should continue
     /// processing the loop.
-    fn process_next_inner<'b, R: io::BufRead>(
+    fn process_next_inner<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<ProcessingStatus> {
-        let pos_state = self.output().len() & ((1 << self.pb()) - 1);
+        let pos_state = self.output.len() & ((1 << self.pb) - 1);
 
         // Literal
-        let state = *self.state();
         if !rangecoder.decode_bit(
             // TODO: assumes pb = 2 ??
-            &mut self.is_match()[(state << 4) + pos_state],
+            &mut self.is_match[(self.state << 4) + pos_state],
             update,
         )? {
             let byte: u8 = self.decode_literal(rangecoder, update)?;
 
             if update {
                 lzma_debug!("Literal: {}", byte);
-                self.output_mut().append_literal(byte)?;
+                self.output.append_literal(byte)?;
 
-                *self.state() = if *self.state() < 4 {
+                self.state = if self.state < 4 {
                     0
-                } else if *self.state() < 10 {
-                    *self.state() - 3
+                } else if self.state < 10 {
+                    self.state - 3
                 } else {
-                    *self.state() - 6
+                    self.state - 6
                 };
             }
             return Ok(ProcessingStatus::Continue);
@@ -623,73 +286,70 @@ where
 
         // LZ
         let mut len: usize;
-        let state = *self.state();
         // Distance is repeated from LRU
-        if rangecoder.decode_bit(&mut self.is_rep()[state], update)? {
+        if rangecoder.decode_bit(&mut self.is_rep[self.state], update)? {
             // dist = rep[0]
-            if !rangecoder.decode_bit(&mut self.is_rep_g0()[state], update)? {
+            if !rangecoder.decode_bit(&mut self.is_rep_g0[self.state], update)? {
                 // len = 1
-                if !rangecoder
-                    .decode_bit(&mut self.is_rep_0long()[(state << 4) + pos_state], update)?
-                {
+                if !rangecoder.decode_bit(
+                    &mut self.is_rep_0long[(self.state << 4) + pos_state],
+                    update,
+                )? {
                     // update state (short rep)
                     if update {
-                        *self.state() = if state < 7 { 9 } else { 11 };
-                        let dist = self.rep()[0] + 1;
-                        self.output_mut().append_lz(1, dist)?;
+                        self.state = if self.state < 7 { 9 } else { 11 };
+                        let dist = self.rep[0] + 1;
+                        self.output.append_lz(1, dist)?;
                     }
                     return Ok(ProcessingStatus::Continue);
                 }
             // dist = rep[i]
             } else {
                 let idx: usize;
-                let state = *self.state();
-                if !rangecoder.decode_bit(&mut self.is_rep_g1()[state], update)? {
+                if !rangecoder.decode_bit(&mut self.is_rep_g1[self.state], update)? {
                     idx = 1;
-                } else if !rangecoder.decode_bit(&mut self.is_rep_g2()[state], update)? {
+                } else if !rangecoder.decode_bit(&mut self.is_rep_g2[self.state], update)? {
                     idx = 2;
                 } else {
                     idx = 3;
                 }
                 if update {
                     // Update LRU
-                    let dist = self.rep()[idx];
+                    let dist = self.rep[idx];
                     for i in (0..idx).rev() {
-                        self.rep()[i + 1] = self.rep()[i];
+                        self.rep[i + 1] = self.rep[i];
                     }
-                    self.rep()[0] = dist
+                    self.rep[0] = dist
                 }
             }
 
-            len = self
-                .rep_len_decoder()
-                .decode(rangecoder, pos_state, update)?;
+            len = self.rep_len_decoder.decode(rangecoder, pos_state, update)?;
 
             if update {
                 // update state (rep)
-                *self.state() = if *self.state() < 7 { 8 } else { 11 };
+                self.state = if self.state < 7 { 8 } else { 11 };
             }
         // New distance
         } else {
             if update {
                 // Update LRU
-                self.rep()[3] = self.rep()[2];
-                self.rep()[2] = self.rep()[1];
-                self.rep()[1] = self.rep()[0];
+                self.rep[3] = self.rep[2];
+                self.rep[2] = self.rep[1];
+                self.rep[1] = self.rep[0];
             }
 
-            len = self.len_decoder().decode(rangecoder, pos_state, update)?;
+            len = self.len_decoder.decode(rangecoder, pos_state, update)?;
 
             if update {
                 // update state (match)
-                *self.state() = if *self.state() < 7 { 7 } else { 10 };
+                self.state = if self.state < 7 { 7 } else { 10 };
             }
 
             let rep_0 = self.decode_distance(rangecoder, len, update)?;
 
             if update {
-                self.rep()[0] = rep_0;
-                if self.rep()[0] == 0xFFFF_FFFF {
+                self.rep[0] = rep_0;
+                if self.rep[0] == 0xFFFF_FFFF {
                     if rangecoder.is_finished_ok()? {
                         return Ok(ProcessingStatus::Finished);
                     }
@@ -703,16 +363,16 @@ where
         if update {
             len += 2;
 
-            let dist = self.rep()[0] + 1;
-            self.output_mut().append_lz(len, dist)?;
+            let dist = self.rep[0] + 1;
+            self.output.append_lz(len, dist)?;
         }
 
         Ok(ProcessingStatus::Continue)
     }
 
-    fn process_next<'b, R: io::BufRead>(
+    fn process_next<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<ProcessingStatus> {
         self.process_next_inner(rangecoder, true)
     }
@@ -723,59 +383,60 @@ where
     /// the decompressor. Needed in streaming mode to avoid corrupting the
     /// state while processing incomplete chunks of data.
     fn try_process_next(&mut self, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
-        let mut temp = io::Cursor::new(buf);
+        let mut temp = std::io::Cursor::new(buf);
         let mut rangecoder = rangecoder::RangeDecoder::from_parts(&mut temp, range, code);
         let _ = self.process_next_inner(&mut rangecoder, false)?;
         Ok(())
     }
 
     /// Utility function to read data into the partial input buffer.
-    fn read_partial_input_buf<'b, R: io::BufRead>(
+    fn read_partial_input_buf<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<()> {
         // Fill as much of the tmp buffer as possible
-        let start = self.partial_input_buf().position() as usize;
+        let start = self.partial_input_buf.position() as usize;
         let bytes_read =
-            rangecoder.read_into(&mut self.partial_input_buf().get_mut()[start..])? as u64;
-        let position = self.partial_input_buf().position();
-        self.partial_input_buf().set_position(position + bytes_read);
+            rangecoder.read_into(&mut self.partial_input_buf.get_mut()[start..])? as u64;
+        self.partial_input_buf
+            .set_position(self.partial_input_buf.position() + bytes_read);
         Ok(())
     }
 
-    fn process_mode<'b, R: io::BufRead>(
+    fn process_mode<'a, R: io::BufRead>(
         &mut self,
-        mut rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        mut rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         mode: ProcessingMode,
     ) -> error::Result<()> {
         loop {
-            if let Some(unpacked_size) = self.unpacked_size() {
-                let unpacked_size = *unpacked_size;
-                if self.output().len() as u64 >= unpacked_size {
+            if let Some(unpacked_size) = self.unpacked_size {
+                if self.output.len() as u64 >= unpacked_size {
                     break;
                 }
             } else if match mode {
                 ProcessingMode::Partial => {
-                    rangecoder.is_eof()? && self.partial_input_buf().position() as usize == 0
+                    rangecoder.is_eof()? && self.partial_input_buf.position() as usize == 0
                 }
                 ProcessingMode::Finish => {
-                    rangecoder.is_finished_ok()?
-                        && self.partial_input_buf().position() as usize == 0
+                    rangecoder.is_finished_ok()? && self.partial_input_buf.position() as usize == 0
                 }
             } {
                 break;
             }
 
-            if self.partial_input_buf().position() as usize > 0 {
+            if self.partial_input_buf.position() as usize > 0 {
                 self.read_partial_input_buf(rangecoder)?;
-                let tmp = *self.partial_input_buf().get_ref();
+                let tmp = *self.partial_input_buf.get_ref();
 
                 // Check if we need more data to advance the decompressor
-                let position = self.partial_input_buf().position() as usize;
                 if mode == ProcessingMode::Partial
-                    && position < MAX_REQUIRED_INPUT
+                    && (self.partial_input_buf.position() as usize) < MAX_REQUIRED_INPUT
                     && self
-                        .try_process_next(&tmp[..position], rangecoder.range, rangecoder.code)
+                        .try_process_next(
+                            &tmp[..self.partial_input_buf.position() as usize],
+                            rangecoder.range,
+                            rangecoder.code,
+                        )
                         .is_err()
                 {
                     return Ok(());
@@ -783,7 +444,7 @@ where
 
                 // Run the decompressor on the tmp buffer
                 let mut tmp_reader =
-                    io::Cursor::new(&tmp[..self.partial_input_buf().position() as usize]);
+                    io::Cursor::new(&tmp[..self.partial_input_buf.position() as usize]);
                 let mut tmp_rangecoder = rangecoder::RangeDecoder::from_parts(
                     &mut tmp_reader,
                     rangecoder.range,
@@ -795,11 +456,11 @@ where
                 rangecoder.set(tmp_rangecoder.range, tmp_rangecoder.code);
 
                 // Update tmp buffer
-                let end = self.partial_input_buf().position();
+                let end = self.partial_input_buf.position();
                 let new_len = end - tmp_reader.position();
-                self.partial_input_buf().get_mut()[..new_len as usize]
+                self.partial_input_buf.get_mut()[..new_len as usize]
                     .copy_from_slice(&tmp[tmp_reader.position() as usize..end as usize]);
-                self.partial_input_buf().set_position(new_len);
+                self.partial_input_buf.set_position(new_len);
 
                 if res == ProcessingStatus::Finished {
                     break;
@@ -821,10 +482,10 @@ where
             }
         }
 
-        if let Some(len) = self.unpacked_size() {
-            if mode == ProcessingMode::Finish && *len != self.output().len() as u64 {
+        if let Some(len) = self.unpacked_size {
+            if mode == ProcessingMode::Finish && len != self.output.len() as u64 {
                 return Err(error::Error::LzmaError(
-                    "Expected unpacked size of {len} but decompressed to {self.output().len()}",
+                    "Expected unpacked size of {len} but decompressed to {self.output.len()}",
                 ));
             }
         }
@@ -832,29 +493,28 @@ where
         Ok(())
     }
 
-    fn decode_literal<'b, R: io::BufRead>(
+    fn decode_literal<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<u8> {
         let def_prev_byte = 0u8;
-        let prev_byte = self.output().last_or(def_prev_byte) as usize;
+        let prev_byte = self.output.last_or(def_prev_byte) as usize;
 
         let mut result: usize = 1;
-        let lit_state = ((self.output().len() & ((1 << self.lp()) - 1)) << self.lc())
-            + (prev_byte >> (8 - self.lc()));
+        let lit_state =
+            ((self.output.len() & ((1 << self.lp) - 1)) << self.lc) + (prev_byte >> (8 - self.lc));
+        let probs = &mut self.literal_probs[lit_state];
 
-        if *self.state() >= 7 {
-            let v = self.rep()[0];
-            let mut match_byte = self.output().last_n(v + 1)? as usize;
+        if self.state >= 7 {
+            let mut match_byte = self.output.last_n(self.rep[0] + 1)? as usize;
 
             while result < 0x100 {
                 let match_bit = (match_byte >> 7) & 1;
                 match_byte <<= 1;
-                let bit = rangecoder.decode_bit(
-                    &mut self.literal_probs()[lit_state][((1 + match_bit) << 8) + result],
-                    update,
-                )? as usize;
+                let bit = rangecoder
+                    .decode_bit(&mut probs[((1 + match_bit) << 8) + result], update)?
+                    as usize;
                 result = (result << 1) ^ bit;
                 if match_bit != bit {
                     break;
@@ -863,23 +523,21 @@ where
         }
 
         while result < 0x100 {
-            result = (result << 1)
-                ^ (rangecoder.decode_bit(&mut self.literal_probs()[lit_state][result], update)?
-                    as usize);
+            result = (result << 1) ^ (rangecoder.decode_bit(&mut probs[result], update)? as usize);
         }
 
         Ok((result - 0x100) as u8)
     }
 
-    fn decode_distance<'b, R: io::BufRead>(
+    fn decode_distance<'a, R: io::BufRead>(
         &mut self,
-        rangecoder: &mut rangecoder::RangeDecoder<'b, R>,
+        rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         length: usize,
         update: bool,
     ) -> error::Result<usize> {
         let len_state = if length > 3 { 3 } else { length };
 
-        let pos_slot = self.pos_slot_decoder()[len_state].parse(rangecoder, update)? as usize;
+        let pos_slot = self.pos_slot_decoder[len_state].parse(rangecoder, update)? as usize;
         if pos_slot < 4 {
             return Ok(pos_slot);
         }
@@ -890,13 +548,13 @@ where
         if pos_slot < 14 {
             result += rangecoder.parse_reverse_bit_tree(
                 num_direct_bits,
-                &mut self.pos_decoders(),
+                &mut self.pos_decoders,
                 result - pos_slot,
                 update,
             )? as usize;
         } else {
             result += (rangecoder.get(num_direct_bits - 4)? as usize) << 4;
-            result += self.align_decoder().parse_reverse(rangecoder, update)? as usize;
+            result += self.align_decoder.parse_reverse(rangecoder, update)? as usize;
         }
 
         Ok(result)
