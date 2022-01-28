@@ -61,7 +61,7 @@ where
 
         if self.buf.len() < new_len {
             if new_len <= MEM_LIMIT {
-                self.buf.resize(new_len, 0);
+                self.buf.resize(new_len, 0).unwrap_or_else(|_| unreachable!());
             } else {
                 return Err(error::Error::LzmaError(
                     "exceeded memory limit of {MEM_LIMIT}",

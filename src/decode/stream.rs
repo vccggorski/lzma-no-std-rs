@@ -1,10 +1,10 @@
 use crate::decode::lzbuffer::{LzBuffer, LzCircularBuffer};
-use crate::decode::lzma::{new_circular, new_circular_with_memlimit, DecoderState, LzmaParams};
+use crate::decode::lzma::{DecoderState, LzmaParams};
 use crate::decode::rangecoder::RangeDecoder;
 use crate::decompress::Options;
 use crate::error::Error;
+use crate::io::{self, BufRead, Cursor, Read, Write};
 use core::fmt::Debug;
-use std::io::{self, BufRead, Cursor, Read, Write};
 
 /// Minimum header length to be read.
 /// - props: u8 (1 byte)
@@ -26,27 +26,29 @@ const MAX_TMP_LEN: usize = MAX_HEADER_LEN + START_BYTES;
 /// Internal state of this streaming decoder. This is needed because we have to
 /// initialize the stream before processing any data.
 #[derive(Debug)]
-enum State<W>
+enum State<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
 where
     W: Write,
 {
     /// Stream is initialized but header values have not yet been read.
     Header(W),
-    /// Header values have been read and the stream is ready to process more data.
-    Data(RunState<W>),
+    /// Header values have been read and the stream is ready to process more
+    /// data.
+    Data(RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>),
 }
 
 /// Structures needed while decoding data.
-struct RunState<W>
+struct RunState<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
 where
     W: Write,
 {
-    decoder: DecoderState<W, LzCircularBuffer<W>>,
+    decoder: DecoderState<W, LzCircularBuffer<W, DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
     range: u32,
     code: u32,
 }
 
-impl<W> Debug for RunState<W>
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
+    for RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
 where
     W: Write,
 {
@@ -60,20 +62,22 @@ where
 
 /// Lzma decompressor that can process multiple chunks of data using the
 /// `io::Write` interface.
-pub struct Stream<W>
+pub struct Stream<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
 where
     W: Write,
 {
     /// Temporary buffer to hold data while the header is being read.
     tmp: Cursor<[u8; MAX_TMP_LEN]>,
     /// Whether the stream is initialized and ready to process data.
-    /// An `Option` is used to avoid interior mutability when updating the state.
-    state: Option<State<W>>,
+    /// An `Option` is used to avoid interior mutability when updating the
+    /// state.
+    state: Option<State<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>>,
     /// Options given when a stream is created.
     options: Options,
 }
 
-impl<W> Stream<W>
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
+    Stream<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
 where
     W: Write,
 {
@@ -152,18 +156,13 @@ where
         output: W,
         mut input: &mut R,
         options: &Options,
-    ) -> crate::error::Result<State<W>> {
+    ) -> crate::error::Result<State<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
         match LzmaParams::read_header(&mut input, options) {
             Ok(params) => {
-                let decoder = if let Some(memlimit) = options.memlimit {
-                    new_circular_with_memlimit(output, params, memlimit)
-                } else {
-                    new_circular(output, params)
-                }?;
-
                 // The RangeDecoder is only kept temporarily as we are processing
                 // chunks of data.
                 if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
+                    let decoder = DecoderState::new(output, params)?;
                     Ok(State::Data(RunState {
                         decoder,
                         range: rangecoder.range,
@@ -172,7 +171,7 @@ where
                 } else {
                     // Failed to create a RangeDecoder because we need more data,
                     // try again later.
-                    Ok(State::Header(decoder.output.into_output()))
+                    Ok(State::Header(output))
                 }
             }
             // Failed to read_header() because we need more data, try again later.
@@ -183,7 +182,10 @@ where
     }
 
     /// Process compressed data
-    fn read_data<R: BufRead>(mut state: RunState<W>, mut input: &mut R) -> io::Result<RunState<W>> {
+    fn read_data<R: BufRead>(
+        mut state: RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
+        mut input: &mut R,
+    ) -> io::Result<RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
         // Construct our RangeDecoder from the previous range and code
         // values.
         let mut rangecoder = RangeDecoder::from_parts(&mut input, state.range, state.code);
@@ -202,7 +204,8 @@ where
     }
 }
 
-impl<W> Debug for Stream<W>
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
+    for Stream<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
 where
     W: Write + Debug,
 {
@@ -215,7 +218,8 @@ where
     }
 }
 
-impl<W> Write for Stream<W>
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Write
+    for Stream<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
 where
     W: Write,
 {
@@ -231,7 +235,7 @@ where
                         let position = self.tmp.position();
                         let bytes_read =
                             input.read(&mut self.tmp.get_mut()[position as usize..])?;
-                        let bytes_read = if bytes_read < std::u64::MAX as usize {
+                        let bytes_read = if bytes_read < u64::MAX as usize {
                             bytes_read as u64
                         } else {
                             return Err(io::Error::new(
@@ -272,7 +276,7 @@ where
                                 // reset the cursor because we may have partial reads
                                 input.set_position(0);
                                 let bytes_read = input.read(&mut self.tmp.get_mut()[..])?;
-                                let bytes_read = if bytes_read < std::u64::MAX as usize {
+                                let bytes_read = if bytes_read < u64::MAX as usize {
                                     bytes_read as u64
                                 } else {
                                     return Err(io::Error::new(
@@ -292,12 +296,7 @@ where
                         // occurs when the output was consumed due to a
                         // non-recoverable error
                         Err(e) => {
-                            return Err(match e {
-                                Error::IoError(e) | Error::HeaderTooShort(e) => e,
-                                Error::LzmaError(e) | Error::XzError(e) => {
-                                    io::Error::new(io::ErrorKind::Other, e)
-                                }
-                            });
+                            todo!("Update error handling");
                         }
                     }
                 }
@@ -338,7 +337,7 @@ where
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> io::Error {
-        io::Error::new("{error:?}")
+        io::Error::new(io::ErrorKind::Other, "{error:?}")
     }
 }
 
