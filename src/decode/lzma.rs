@@ -137,7 +137,7 @@ where
     pub lp: u32, // 0..4
     // context for literal/match is plaintext offset modulo 2^pb
     pub pb: u32, // 0..4
-    unpacked_size: Option<u64>,
+    pub unpacked_size: Option<u64>,
     literal_probs: [[u16; 0x300]; PROBS_MEM_LIMIT],
     pos_slot_decoder: [rangecoder::BitTree<64>; 4],
     align_decoder: rangecoder::BitTree<16>,

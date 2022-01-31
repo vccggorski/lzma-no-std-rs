@@ -60,6 +60,17 @@ where
     }
 }
 
+#[derive(Debug)]
+pub enum StreamStatus {
+    ProcessingHeader,
+    ProcessingData {
+        unpacked_data_processed: u64,
+        unpacked_size: Option<u64>,
+    },
+    InvalidState,
+    Finished,
+}
+
 /// Lzma decompressor that can process multiple chunks of data using the
 /// `io::Write` interface.
 pub struct Stream<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
@@ -299,6 +310,29 @@ where
             }
         }
         Ok(())
+    }
+
+    pub fn get_stream_status(&self) -> StreamStatus {
+        use State::*;
+        use StreamStatus::*;
+        match &self.state {
+            Some(Header) => ProcessingHeader,
+            Some(Data(run_state)) => {
+                let unpacked_size = run_state.decoder.unpacked_size;
+                let unpacked_data_processed =
+                    LzBuffer::<W>::len(&run_state.decoder.output) as u64 + self.tmp.position();
+                if let Some(unpacked_size) = unpacked_size {
+                    if unpacked_size == unpacked_data_processed {
+                        return Finished;
+                    }
+                }
+                ProcessingData {
+                    unpacked_size,
+                    unpacked_data_processed,
+                }
+            }
+            None => InvalidState,
+        }
     }
 }
 
