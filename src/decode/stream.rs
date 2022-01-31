@@ -187,7 +187,7 @@ where
         })
     }
 
-    pub fn write(&mut self, data: &[u8], output: &mut W) -> io::Result<usize> {
+    pub fn write(&mut self, output: &mut W, data: &[u8]) -> io::Result<usize> {
         let mut input = Cursor::new(data);
 
         if let Some(state) = self.state.take() {

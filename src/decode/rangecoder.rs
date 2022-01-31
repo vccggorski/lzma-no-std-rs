@@ -156,10 +156,10 @@ where
 
 // TODO: parametrize by constant and use [u16; 1 << num_bits] as soon as Rust
 // supports this
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct BitTree<const SIZE: usize> {
     num_bits: usize,
-    probs: Vec<u16, SIZE>,
+    probs: [u16; SIZE],
 }
 
 impl<const SIZE: usize> Default for BitTree<SIZE> {
@@ -167,7 +167,7 @@ impl<const SIZE: usize> Default for BitTree<SIZE> {
         Self {
             num_bits: util::exact_log2(SIZE)
                 .unwrap_or_else(|| panic!("BitTree<SIZE> where SIZE is not power of 2")),
-            probs: Vec::from_iter(repeat(0x400)),
+            probs: [0x400; SIZE],
         }
     }
 }
@@ -193,8 +193,8 @@ impl<const SIZE: usize> BitTree<SIZE> {
 pub struct LenDecoder {
     choice: u16,
     choice2: u16,
-    low_coder: Vec<BitTree<8>, 16>,
-    mid_coder: Vec<BitTree<8>, 16>,
+    low_coder: [BitTree<8>; 16],
+    mid_coder: [BitTree<8>; 16],
     high_coder: BitTree<256>,
 }
 
@@ -203,8 +203,8 @@ impl Default for LenDecoder {
         Self {
             choice: 0x400,
             choice2: 0x400,
-            low_coder: Vec::from_iter(repeat(Default::default())),
-            mid_coder: Vec::from_iter(repeat(Default::default())),
+            low_coder: [Default::default(); 16],
+            mid_coder: [Default::default(); 16],
             high_coder: Default::default(),
         }
     }

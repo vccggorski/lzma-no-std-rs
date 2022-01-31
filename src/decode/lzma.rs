@@ -138,8 +138,8 @@ where
     // context for literal/match is plaintext offset modulo 2^pb
     pub pb: u32, // 0..4
     unpacked_size: Option<u64>,
-    literal_probs: Vec<Vec<u16, 0x300>, PROBS_MEM_LIMIT>,
-    pos_slot_decoder: Vec<rangecoder::BitTree<64>, 4>,
+    literal_probs: [[u16; 0x300]; PROBS_MEM_LIMIT],
+    pos_slot_decoder: [rangecoder::BitTree<64>; 4],
     align_decoder: rangecoder::BitTree<16>,
     pos_decoders: [u16; 115],
     is_match: [u16; 192], // true = LZ, false = literal
@@ -181,8 +181,8 @@ where
             lp: params.lp,
             pb: params.pb,
             unpacked_size: params.unpacked_size,
-            literal_probs: Vec::from_iter(repeat(Vec::from_iter(repeat(0x400)))),
-            pos_slot_decoder: Vec::from_iter(repeat(Default::default())),
+            literal_probs: [[0x400; 0x300]; PROBS_MEM_LIMIT],
+            pos_slot_decoder: [Default::default(); 4],
             align_decoder: Default::default(),
             pos_decoders: [0x400; 115],
             is_match: [0x400; 192],
@@ -214,8 +214,8 @@ where
         self.lc = lc;
         self.lp = lp;
         self.pb = pb;
-        self.literal_probs = Vec::from_iter(repeat(Vec::from_iter(repeat(0x400))));
-        self.pos_slot_decoder = Vec::from_iter(repeat(Default::default()));
+        self.literal_probs = [[0x400; 0x300]; PROBS_MEM_LIMIT];
+        self.pos_slot_decoder = [Default::default(); 4];
         self.align_decoder = Default::default();
         self.pos_decoders = [0x400; 115];
         self.is_match = [0x400; 192];
@@ -388,7 +388,13 @@ where
     /// This will check to see if there is enough data to consume and advance
     /// the decompressor. Needed in streaming mode to avoid corrupting the
     /// state while processing incomplete chunks of data.
-    fn try_process_next(&mut self, output: &mut W, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
+    fn try_process_next(
+        &mut self,
+        output: &mut W,
+        buf: &[u8],
+        range: u32,
+        code: u32,
+    ) -> error::Result<()> {
         let mut temp = io::Cursor::new(buf);
         let mut rangecoder = rangecoder::RangeDecoder::from_parts(&mut temp, range, code);
         let _ = self.process_next_inner(output, &mut rangecoder, false)?;
