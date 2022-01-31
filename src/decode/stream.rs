@@ -283,6 +283,23 @@ where
         }
         Ok(input.position() as usize)
     }
+
+    pub fn write_all(&mut self, output: &mut W, mut buf: &[u8]) -> io::Result<()> {
+        while !buf.is_empty() {
+            match self.write(output, buf) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "failed to write whole buffer",
+                    ));
+                }
+                Ok(n) => buf = &buf[n..],
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
