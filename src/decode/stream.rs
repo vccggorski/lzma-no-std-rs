@@ -31,7 +31,7 @@ where
     W: Write,
 {
     /// Stream is initialized but header values have not yet been read.
-    Header(W),
+    Header,
     /// Header values have been read and the stream is ready to process more
     /// data.
     Data(RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>),
@@ -42,7 +42,7 @@ struct RunState<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
 where
     W: Write,
 {
-    decoder: DecoderState<W, LzCircularBuffer<W, DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
+    decoder: DecoderState<W, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
     range: u32,
     code: u32,
 }
@@ -83,47 +83,31 @@ where
 {
     /// Initialize the stream. This will consume the `output` which is the sink
     /// implementing `io::Write` that will receive decompressed bytes.
-    pub fn new(output: W) -> Self {
-        Self::new_with_options(&Options::default(), output)
+    pub fn new() -> Self {
+        Self::new_with_options(&Options::default())
     }
 
     /// Initialize the stream with the given `options`. This will consume the
     /// `output` which is the sink implementing `io::Write` that will
     /// receive decompressed bytes.
-    pub fn new_with_options(options: &Options, output: W) -> Self {
+    pub fn new_with_options(options: &Options) -> Self {
         Self {
             tmp: Cursor::new([0; MAX_TMP_LEN]),
-            state: Some(State::Header(output)),
+            state: Some(State::Header),
             options: *options,
         }
     }
 
-    /// Get a reference to the output sink
-    pub fn get_output(&self) -> Option<&W> {
-        self.state.as_ref().map(|state| match state {
-            State::Header(output) => &output,
-            State::Data(state) => state.decoder.output.get_output(),
-        })
-    }
-
-    /// Get a mutable reference to the output sink
-    pub fn get_output_mut(&mut self) -> Option<&mut W> {
-        self.state.as_mut().map(|state| match state {
-            State::Header(output) => output,
-            State::Data(state) => state.decoder.output.get_output_mut(),
-        })
-    }
-
     /// Consumes the stream and returns the output sink. This also makes sure
     /// we have properly reached the end of the stream.
-    pub fn finish(mut self) -> crate::error::Result<W> {
+    pub fn finish(mut self, output: &mut W) -> crate::error::Result<()> {
         if let Some(state) = self.state.take() {
             match state {
-                State::Header(output) => {
+                State::Header => {
                     if self.tmp.position() > 0 {
                         Err(Error::LzmaError("failed to read header"))
                     } else {
-                        Ok(output)
+                        Ok(())
                     }
                 }
                 State::Data(mut state) => {
@@ -134,10 +118,10 @@ where
                             Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
                         let mut range_decoder =
                             RangeDecoder::from_parts(&mut stream, state.range, state.code);
-                        state.decoder.process(&mut range_decoder)?;
+                        state.decoder.process(output, &mut range_decoder)?;
                     }
-                    let output = state.decoder.output.finish()?;
-                    Ok(output)
+                    let output = state.decoder.output.finish(output)?;
+                    Ok(())
                 }
             }
         } else {
@@ -153,7 +137,6 @@ where
     /// This function will consume the state, returning the next state on both
     /// error and success.
     fn read_header<R: BufRead>(
-        output: W,
         mut input: &mut R,
         options: &Options,
     ) -> crate::error::Result<State<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
@@ -162,7 +145,7 @@ where
                 // The RangeDecoder is only kept temporarily as we are processing
                 // chunks of data.
                 if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
-                    let decoder = DecoderState::new(output, params)?;
+                    let decoder = DecoderState::new(params)?;
                     Ok(State::Data(RunState {
                         decoder,
                         range: rangecoder.range,
@@ -171,11 +154,11 @@ where
                 } else {
                     // Failed to create a RangeDecoder because we need more data,
                     // try again later.
-                    Ok(State::Header(output))
+                    Ok(State::Header)
                 }
             }
             // Failed to read_header() because we need more data, try again later.
-            Err(Error::HeaderTooShort(_)) => Ok(State::Header(output)),
+            Err(Error::HeaderTooShort(_)) => Ok(State::Header),
             // Fatal error. Don't retry.
             Err(e) => Err(e),
         }
@@ -184,6 +167,7 @@ where
     /// Process compressed data
     fn read_data<R: BufRead>(
         mut state: RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
+        output: &mut W,
         mut input: &mut R,
     ) -> io::Result<RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
         // Construct our RangeDecoder from the previous range and code
@@ -193,7 +177,7 @@ where
         // Try to process all bytes of data.
         state
             .decoder
-            .process_stream(&mut rangecoder)
+            .process_stream(output, &mut rangecoder)
             .map_err(|e| -> io::Error { e.into() })?;
 
         Ok(RunState {
@@ -202,34 +186,14 @@ where
             code: rangecoder.code,
         })
     }
-}
 
-impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
-    for Stream<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
-where
-    W: Write + Debug,
-{
-    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
-        fmt.debug_struct("Stream")
-            .field("tmp", &self.tmp.position())
-            .field("state", &self.state)
-            .field("options", &self.options)
-            .finish()
-    }
-}
-
-impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Write
-    for Stream<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
-where
-    W: Write,
-{
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+    pub fn write(&mut self, data: &[u8], output: &mut W) -> io::Result<usize> {
         let mut input = Cursor::new(data);
 
         if let Some(state) = self.state.take() {
             let state = match state {
                 // Read the header values and transition into a running state.
-                State::Header(state) => {
+                State::Header => {
                     let res = if self.tmp.position() > 0 {
                         // attempt to fill the tmp buffer
                         let position = self.tmp.position();
@@ -249,7 +213,7 @@ where
                         let (position, res) = {
                             let mut tmp_input =
                                 Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                            let res = Stream::read_header(state, &mut tmp_input, &self.options);
+                            let res = Stream::read_header(&mut tmp_input, &self.options);
                             (tmp_input.position(), res)
                         };
 
@@ -265,13 +229,13 @@ where
                         }
                         res
                     } else {
-                        Stream::read_header(state, &mut input, &self.options)
+                        Stream::read_header(&mut input, &self.options)
                     };
 
                     match res {
                         // occurs when not enough input bytes were provided to
                         // read the entire header
-                        Ok(State::Header(val)) => {
+                        Ok(State::Header) => {
                             if self.tmp.position() == 0 {
                                 // reset the cursor because we may have partial reads
                                 input.set_position(0);
@@ -286,7 +250,7 @@ where
                                 };
                                 self.tmp.set_position(bytes_read);
                             }
-                            State::Header(val)
+                            State::Header
                         }
 
                         // occurs when the header was successfully read and we
@@ -306,32 +270,32 @@ where
                     let state = if self.tmp.position() > 0 {
                         let mut tmp_input =
                             Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                        let res = Stream::read_data(state, &mut tmp_input)?;
+                        let res = Stream::read_data(state, output, &mut tmp_input)?;
                         self.tmp.set_position(0);
                         res
                     } else {
                         state
                     };
-                    State::Data(Stream::read_data(state, &mut input)?)
+                    State::Data(Stream::read_data(state, output, &mut input)?)
                 }
             };
             self.state.replace(state);
         }
         Ok(input.position() as usize)
     }
+}
 
-    /// Flushes the output sink. The internal buffer isn't flushed to avoid
-    /// corrupting the internal state. Instead, call `finish()` to finalize the
-    /// stream and flush all remaining internal data.
-    fn flush(&mut self) -> io::Result<()> {
-        if let Some(ref mut state) = self.state {
-            match state {
-                State::Header(_) => Ok(()),
-                State::Data(state) => state.decoder.output.get_output_mut().flush(),
-            }
-        } else {
-            Ok(())
-        }
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
+    for Stream<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
+where
+    W: Write + Debug,
+{
+    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+        fmt.debug_struct("Stream")
+            .field("tmp", &self.tmp.position())
+            .field("state", &self.state)
+            .field("options", &self.options)
+            .finish()
     }
 }
 

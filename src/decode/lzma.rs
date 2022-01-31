@@ -155,11 +155,11 @@ where
 }
 
 impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
-    DecoderState<W, lzbuffer::LzCircularBuffer<W, DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>
+    DecoderState<W, lzbuffer::LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>
 where
     W: io::Write,
 {
-    pub fn new(output: W, params: LzmaParams) -> error::Result<Self> {
+    pub fn new(params: LzmaParams) -> error::Result<Self> {
         let dict_size = params.dict_size as usize;
         if dict_size > DICT_MEM_LIMIT {
             return Err(error::Error::DictionaryBufferTooSmall {
@@ -175,7 +175,7 @@ where
         }
         Ok(Self {
             _phantom: PhantomData,
-            output: lzbuffer::LzCircularBuffer::from_stream(output, dict_size),
+            output: lzbuffer::LzCircularBuffer::new(dict_size),
             partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
             lc: params.lc,
             lp: params.lp,
@@ -237,17 +237,19 @@ where
 
     pub fn process<'a, R: io::BufRead>(
         &mut self,
+        output: &mut W,
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<()> {
-        self.process_mode(rangecoder, ProcessingMode::Finish)
+        self.process_mode(output, rangecoder, ProcessingMode::Finish)
     }
 
     #[cfg(feature = "stream")]
     pub fn process_stream<'a, R: io::BufRead>(
         &mut self,
+        output: &mut W,
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<()> {
-        self.process_mode(rangecoder, ProcessingMode::Partial)
+        self.process_mode(output, rangecoder, ProcessingMode::Partial)
     }
 
     /// Process the next iteration of the loop.
@@ -258,6 +260,7 @@ where
     /// processing the loop.
     fn process_next_inner<'a, R: io::BufRead>(
         &mut self,
+        output: &mut W,
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<ProcessingStatus> {
@@ -273,7 +276,7 @@ where
 
             if update {
                 lzma_debug!("Literal: {}", byte);
-                self.output.append_literal(byte)?;
+                self.output.append_literal(output, byte)?;
 
                 self.state = if self.state < 4 {
                     0
@@ -301,7 +304,7 @@ where
                     if update {
                         self.state = if self.state < 7 { 9 } else { 11 };
                         let dist = self.rep[0] + 1;
-                        self.output.append_lz(1, dist)?;
+                        self.output.append_lz(output, 1, dist)?;
                     }
                     return Ok(ProcessingStatus::Continue);
                 }
@@ -366,7 +369,7 @@ where
             len += 2;
 
             let dist = self.rep[0] + 1;
-            self.output.append_lz(len, dist)?;
+            self.output.append_lz(output, len, dist)?;
         }
 
         Ok(ProcessingStatus::Continue)
@@ -374,9 +377,10 @@ where
 
     fn process_next<'a, R: io::BufRead>(
         &mut self,
+        output: &mut W,
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
     ) -> error::Result<ProcessingStatus> {
-        self.process_next_inner(rangecoder, true)
+        self.process_next_inner(output, rangecoder, true)
     }
 
     /// Try to process the next iteration of the loop.
@@ -384,10 +388,10 @@ where
     /// This will check to see if there is enough data to consume and advance
     /// the decompressor. Needed in streaming mode to avoid corrupting the
     /// state while processing incomplete chunks of data.
-    fn try_process_next(&mut self, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
+    fn try_process_next(&mut self, output: &mut W, buf: &[u8], range: u32, code: u32) -> error::Result<()> {
         let mut temp = io::Cursor::new(buf);
         let mut rangecoder = rangecoder::RangeDecoder::from_parts(&mut temp, range, code);
-        let _ = self.process_next_inner(&mut rangecoder, false)?;
+        let _ = self.process_next_inner(output, &mut rangecoder, false)?;
         Ok(())
     }
 
@@ -407,6 +411,7 @@ where
 
     fn process_mode<'a, R: io::BufRead>(
         &mut self,
+        output: &mut W,
         mut rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         mode: ProcessingMode,
     ) -> error::Result<()> {
@@ -435,6 +440,7 @@ where
                     && (self.partial_input_buf.position() as usize) < MAX_REQUIRED_INPUT
                     && self
                         .try_process_next(
+                            output,
                             &tmp[..self.partial_input_buf.position() as usize],
                             rangecoder.range,
                             rangecoder.code,
@@ -452,7 +458,7 @@ where
                     rangecoder.range,
                     rangecoder.code,
                 );
-                let res = self.process_next(&mut tmp_rangecoder)?;
+                let res = self.process_next(output, &mut tmp_rangecoder)?;
 
                 // Update the actual rangecoder
                 rangecoder.set(tmp_rangecoder.range, tmp_rangecoder.code);
@@ -472,13 +478,13 @@ where
                 if mode == ProcessingMode::Partial
                     && buf.len() < MAX_REQUIRED_INPUT
                     && self
-                        .try_process_next(buf, rangecoder.range, rangecoder.code)
+                        .try_process_next(output, buf, rangecoder.range, rangecoder.code)
                         .is_err()
                 {
                     return self.read_partial_input_buf(rangecoder);
                 }
 
-                if self.process_next(&mut rangecoder)? == ProcessingStatus::Finished {
+                if self.process_next(output, &mut rangecoder)? == ProcessingStatus::Finished {
                     break;
                 };
             }

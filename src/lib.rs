@@ -58,13 +58,13 @@ pub fn lzma_decompress_with_options<
     use crate::decode::lzbuffer::LzCircularBuffer;
     let params = decode::lzma::LzmaParams::read_header(input, options)?;
     let mut decoder =
-        decode::lzma::DecoderState::<_, LzCircularBuffer<_, DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>::new(
-            output, params,
+        decode::lzma::DecoderState::<_, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>::new(
+            params,
         )?;
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
         .map_err(|e| error::Error::LzmaError("LZMA stream too short: {e}"))?;
-    decoder.process(&mut rangecoder)?;
-    decoder.output.finish()?;
+    decoder.process(output, &mut rangecoder)?;
+    decoder.output.finish(output)?;
     Ok(())
 }
