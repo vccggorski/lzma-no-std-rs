@@ -21,6 +21,8 @@ where
     fn reset(&mut self);
 }
 
+// TODO: Consider moving to raw array? Last heapless dependency I believe
+
 // A circular buffer for LZ sequences
 pub struct LzCircularBuffer<const MEM_LIMIT: usize> {
     buf: Vec<u8, MEM_LIMIT>,  // Circular buffer
@@ -30,9 +32,12 @@ pub struct LzCircularBuffer<const MEM_LIMIT: usize> {
 }
 
 impl<const MEM_LIMIT: usize> LzCircularBuffer<MEM_LIMIT> {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
+        let mut buf = Vec::new();
+        buf.resize_default(MEM_LIMIT)
+            .unwrap_or_else(|_| unreachable!("Buffer must be at least MEM_LIMIT"));
         Self {
-            buf: Vec::new(),
+            buf,
             dict_size: None,
             cursor: 0,
             len: 0,
@@ -47,15 +52,9 @@ impl<const MEM_LIMIT: usize> LzCircularBuffer<MEM_LIMIT> {
         let new_len = index + 1;
 
         if self.buf.len() < new_len {
-            if new_len <= MEM_LIMIT {
-                self.buf
-                    .resize(new_len, 0)
-                    .unwrap_or_else(|_| unreachable!());
-            } else {
-                return Err(error::Error::LzmaError(
-                    "exceeded memory limit of {MEM_LIMIT}",
-                ));
-            }
+            return Err(error::Error::LzmaError(
+                "exceeded memory limit of {MEM_LIMIT}",
+            ));
         }
         self.buf[index] = value;
         Ok(())
