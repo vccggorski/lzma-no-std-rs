@@ -1,7 +1,8 @@
 //! lzma-rs fork containing only no_std based LZMA decoder (standalone function
 //! & stream based)
 
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![allow(warnings)]
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![deny(unsafe_code)]
@@ -9,6 +10,8 @@
 #[macro_use]
 mod macros;
 
+#[cfg(feature = "std")]
+mod encode;
 mod decode;
 pub mod error;
 mod io_ext;
@@ -16,6 +19,12 @@ mod io_ext;
 pub mod io {
     pub use crate::io_ext::*;
     pub use core2::io::*;
+}
+
+/// Compression helpers.
+#[cfg(feature = "std")]
+pub mod compress {
+    pub use crate::encode::options::*;
 }
 
 /// Decompression helpers.
@@ -68,4 +77,24 @@ pub fn lzma_decompress_with_options<
     decoder.process(output, &mut rangecoder)?;
     decoder.output.finish(output)?;
     Ok(())
+}
+
+/// Compresses data with LZMA and default [`Options`](compress/struct.Options.html).
+#[cfg(feature = "std")]
+pub fn lzma_compress<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+) -> io::Result<()> {
+    lzma_compress_with_options(input, output, &compress::Options::default())
+}
+
+/// Compress LZMA data with the provided options.
+#[cfg(feature = "std")]
+pub fn lzma_compress_with_options<R: io::BufRead, W: io::Write>(
+    input: &mut R,
+    output: &mut W,
+    options: &compress::Options,
+) -> io::Result<()> {
+    let encoder = encode::dumbencoder::Encoder::from_stream(output, options)?;
+    encoder.process(input)
 }

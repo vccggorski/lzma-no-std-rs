@@ -1,3 +1,4 @@
+// TODO: Proper error handling needed for tests
 use crate::decode::lzbuffer::{LzBuffer, LzCircularBuffer};
 use crate::decode::lzma::{DecoderState, LzmaParams};
 use crate::decode::rangecoder::RangeDecoder;
@@ -370,31 +371,32 @@ impl From<Error> for io::Error {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod test {
     use super::*;
 
     /// Test an empty stream
     #[test]
     fn test_stream_noop() {
-        let stream = Stream::new(Vec::new());
-        assert!(stream.get_output().unwrap().is_empty());
+        let mut sink = Vec::new();
+        let mut stream = Stream::<_, 4096, 8>::new();
 
-        let output = stream.finish().unwrap();
-        assert!(output.is_empty());
+        stream.finish(&mut sink).unwrap();
+        assert!(sink.is_empty());
     }
 
     /// Test writing an empty slice
     #[test]
     fn test_stream_zero() {
-        let mut stream = Stream::new(Vec::new());
+        let mut sink = Vec::new();
+        let mut stream = Stream::<_, 4096, 8>::new();
 
-        stream.write_all(&[]).unwrap();
-        stream.write_all(&[]).unwrap();
+        stream.write_all(&mut sink, &[]).unwrap();
+        stream.write_all(&mut sink, &[]).unwrap();
 
-        let output = stream.finish().unwrap();
+        stream.finish(&mut sink).unwrap();
 
-        assert!(output.is_empty());
+        assert!(sink.is_empty());
     }
 
     /// Test a bad header value
@@ -403,13 +405,14 @@ mod test {
     fn test_bad_header() {
         let input = [255u8; 32];
 
-        let mut stream = Stream::new(Vec::new());
+        let mut sink = Vec::new();
+        let mut stream = Stream::<_, 4096, 8>::new();
 
-        stream.write_all(&input[..]).unwrap();
+        stream.write_all(&mut sink, &input[..]).unwrap();
 
-        let output = stream.finish().unwrap();
+        stream.finish(&mut sink).unwrap();
 
-        assert!(output.is_empty());
+        assert!(sink.is_empty());
     }
 
     /// Test processing only partial data
@@ -424,16 +427,14 @@ mod test {
         // read the header. Header size is 13 bytes but we also read the first 5
         // bytes of data.
         while end < (MAX_HEADER_LEN + START_BYTES) as u64 {
-            let mut stream = Stream::new(Vec::new());
-            stream.write_all(&input[..end as usize]).unwrap();
+            let mut sink = Vec::new();
+            let mut stream = Stream::<_, 4096, 8>::new();
+            stream.write_all(&mut sink, &input[..end as usize]).unwrap();
             assert_eq!(stream.tmp.position(), end);
 
-            let err = stream.finish().unwrap_err();
-            assert!(
-                err.to_string().contains("failed to read header"),
-                "error was: {}",
-                err
-            );
+            let err = stream.finish(&mut sink).unwrap_err();
+
+            todo!("Assert against proper error type");
 
             end += 1;
         }
@@ -441,16 +442,18 @@ mod test {
         // Test when we fail to provide enough bytes to terminate the stream. A
         // properly terminated stream will have a code value of 0.
         while end < input.len() as u64 {
-            let mut stream = Stream::new(Vec::new());
-            stream.write_all(&input[..end as usize]).unwrap();
+            let mut sink = Vec::new();
+            let mut stream = Stream::<_, 4096, 8>::new();
+            stream.write_all(&mut sink, &input[..end as usize]).unwrap();
 
             // Header bytes will be buffered until there are enough to read
             if end < (MAX_HEADER_LEN + START_BYTES) as u64 {
                 assert_eq!(stream.tmp.position(), end);
             }
 
-            let err = stream.finish().unwrap_err();
-            assert!(err.to_string().contains("failed to fill whole buffer"));
+            let err = stream.finish(&mut sink).unwrap_err();
+
+            todo!("Assert against proper error type");
 
             end += 1;
         }
@@ -471,55 +474,28 @@ mod test {
         for (input, expected) in input {
             for chunk in 1..input.len() {
                 let mut consumed = 0;
-                let mut stream = Stream::new(Vec::new());
+                let mut sink = Vec::new();
+                let mut stream = Stream::<_, 4096, 8>::new();
                 while consumed < input.len() {
                     let end = std::cmp::min(consumed + chunk, input.len());
-                    stream.write_all(&input[consumed..end]).unwrap();
+                    stream.write_all(&mut sink, &input[consumed..end]).unwrap();
                     consumed = end;
                 }
-                let output = stream.finish().unwrap();
-                assert_eq!(expected, &output[..]);
+                stream.finish(&mut sink).unwrap();
+                assert_eq!(expected, &sink[..]);
             }
         }
     }
 
     #[test]
     fn test_stream_corrupted() {
-        let mut stream = Stream::new(Vec::new());
+        let mut sink = Vec::new();
+        let mut stream = Stream::<_, 4096, 8>::new();
         let err = stream
-            .write_all(b"corrupted bytes here corrupted bytes here")
+            .write_all(&mut sink, b"corrupted bytes here corrupted bytes here")
             .unwrap_err();
         assert!(err.to_string().contains("beyond output size"));
-        let err = stream.finish().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("can\'t finish stream because of previous write error"));
-    }
-
-    #[test]
-    fn test_allow_incomplete() {
-        let input = include_bytes!("../../tests/files/small.txt");
-
-        let mut reader = io::Cursor::new(&input[..]);
-        let mut compressed = Vec::new();
-        crate::lzma_compress(&mut reader, &mut compressed).unwrap();
-        let compressed = &compressed[..compressed.len() / 2];
-
-        // Should fail to finish() without the allow_incomplete option.
-        let mut stream = Stream::new(Vec::new());
-        stream.write_all(&compressed[..]).unwrap();
-        stream.finish().unwrap_err();
-
-        // Should succeed with the allow_incomplete option.
-        let mut stream = Stream::new_with_options(
-            &Options {
-                allow_incomplete: true,
-                ..Default::default()
-            },
-            Vec::new(),
-        );
-        stream.write_all(&compressed[..]).unwrap();
-        let output = stream.finish().unwrap();
-        assert_eq!(output, &input[..26]);
+        let err = stream.finish(&mut sink).unwrap_err();
+        todo!("Assert against proper error type");
     }
 }

@@ -43,7 +43,6 @@ mod test {
         assert_eq!(
             Options {
                 unpacked_size: UnpackedSize::ReadFromHeader,
-                allow_incomplete: false,
             },
             Options::default()
         );

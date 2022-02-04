@@ -4,9 +4,14 @@ use crate::io;
 use core::result;
 
 pub mod lzma {
-    #[derive(Debug)]
+    #[derive(PartialEq, Debug)]
     pub enum LzmaError {
+        MatchDistanceIsBeyondDictionarySize { distance: usize, dict_size: usize },
         MatchDistanceIsBeyondOutputSize { distance: usize, buffer_len: usize },
+        LzDistanceIsBeyondDictionarySize { distance: usize, dict_size: usize },
+        LzDistanceIsBeyondOutputSize { distance: usize, buffer_len: usize },
+        InvalidHeader,
+        EosFoundButMoreBytesAvailable,
         ExceededMemoryLimit { memory_limit: usize },
     }
 }
@@ -36,30 +41,5 @@ pub type Result<T> = result::Result<T, Error>;
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Error {
         Error::IoError(e)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::Error;
-
-    #[test]
-    fn test_display() {
-        assert_eq!(
-            Error::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "this is an error"
-            ))
-            .to_string(),
-            "io error: this is an error"
-        );
-        assert_eq!(
-            Error::LzmaError("this is an error".to_string()).to_string(),
-            "lzma error: this is an error"
-        );
-        assert_eq!(
-            Error::XzError("this is an error".to_string()).to_string(),
-            "xz error: this is an error"
-        );
     }
 }

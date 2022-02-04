@@ -18,7 +18,7 @@ use byteorder::ByteOrder;
 ///
 /// Read unsigned 16 bit big-endian integers from a [`Read`]:
 ///
-/// ```rust
+/// ```text
 /// use std::io::Cursor;
 /// use byteorder::{BigEndian, ReadBytesExt};
 ///
@@ -46,7 +46,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read unsigned 8 bit integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::ReadBytesExt;
     ///
@@ -76,7 +76,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read signed 8 bit integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::ReadBytesExt;
     ///
@@ -103,7 +103,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read unsigned 16 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -130,7 +130,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read signed 16 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -157,7 +157,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read unsigned 24 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -183,7 +183,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read signed 24 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -209,7 +209,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read unsigned 32 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -235,7 +235,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read signed 32 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -261,7 +261,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read unsigned 48 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -287,7 +287,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read signed 48 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -313,7 +313,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read an unsigned 64 bit big-endian integer from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -339,7 +339,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a signed 64 bit big-endian integer from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -365,7 +365,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read an unsigned 128 bit big-endian integer from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -394,7 +394,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a signed 128 bit big-endian integer from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -420,7 +420,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read an unsigned n-byte big-endian integer from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -445,7 +445,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read an unsigned n-byte big-endian integer from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -487,7 +487,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a big-endian single-precision floating point number from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f32;
     /// use std::io::Cursor;
     ///
@@ -518,7 +518,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a big-endian double-precision floating point number from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f64;
     /// use std::io::Cursor;
     ///
@@ -552,7 +552,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of unsigned 16 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -587,7 +587,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of unsigned 32 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -622,7 +622,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of unsigned 64 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -660,7 +660,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of unsigned 128 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -706,7 +706,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of signed 8 bit integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -737,7 +737,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of signed 16 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -772,7 +772,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of signed 32 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -807,7 +807,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of signed 64 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -845,7 +845,7 @@ pub trait ReadBytesExt: io::Read {
     ///
     /// Read a sequence of signed 128 bit big-endian integers from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::io::Cursor;
     /// use byteorder::{BigEndian, ReadBytesExt};
     ///
@@ -887,7 +887,7 @@ pub trait ReadBytesExt: io::Read {
     /// Read a sequence of big-endian single-precision floating point number
     /// from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f32;
     /// use std::io::Cursor;
     ///
@@ -932,7 +932,7 @@ pub trait ReadBytesExt: io::Read {
     /// Read a sequence of big-endian single-precision floating point number
     /// from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f32;
     /// use std::io::Cursor;
     ///
@@ -972,7 +972,7 @@ pub trait ReadBytesExt: io::Read {
     /// Read a sequence of big-endian single-precision floating point number
     /// from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f64;
     /// use std::io::Cursor;
     ///
@@ -1023,7 +1023,7 @@ pub trait ReadBytesExt: io::Read {
     /// Read a sequence of big-endian single-precision floating point number
     /// from a `Read`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f64;
     /// use std::io::Cursor;
     ///
@@ -1061,7 +1061,7 @@ impl<R: io::Read + ?Sized> ReadBytesExt for R {}
 ///
 /// Write unsigned 16 bit big-endian integers to a [`Write`]:
 ///
-/// ```rust
+/// ```text
 /// use byteorder::{BigEndian, WriteBytesExt};
 ///
 /// let mut wtr = vec![];
@@ -1089,7 +1089,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 8 bit integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::WriteBytesExt;
     ///
     /// let mut wtr = Vec::new();
@@ -1117,7 +1117,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 8 bit integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::WriteBytesExt;
     ///
     /// let mut wtr = Vec::new();
@@ -1142,7 +1142,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 16 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1169,7 +1169,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 16 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1196,7 +1196,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 24 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1223,7 +1223,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 24 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1250,7 +1250,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 32 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1277,7 +1277,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 32 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1304,7 +1304,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 48 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1331,7 +1331,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 48 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1358,7 +1358,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 64 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1385,7 +1385,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 64 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1433,7 +1433,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write unsigned 40 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1469,7 +1469,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write signed 56 bit big-endian integers to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use byteorder::{BigEndian, WriteBytesExt};
     ///
     /// let mut wtr = Vec::new();
@@ -1531,7 +1531,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write a big-endian single-precision floating point number to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f32;
     ///
     /// use byteorder::{BigEndian, WriteBytesExt};
@@ -1560,7 +1560,7 @@ pub trait WriteBytesExt: io::Write {
     ///
     /// Write a big-endian double-precision floating point number to a `Write`:
     ///
-    /// ```rust
+    /// ```text
     /// use std::f64;
     ///
     /// use byteorder::{BigEndian, WriteBytesExt};

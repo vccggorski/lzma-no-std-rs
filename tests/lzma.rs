@@ -1,3 +1,5 @@
+// TODO: restore this test
+#![cfg(feature = "std")]
 extern crate lzma;
 
 #[cfg(feature = "enable_logging")]
