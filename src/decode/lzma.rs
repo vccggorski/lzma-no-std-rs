@@ -42,14 +42,15 @@ enum ProcessingStatus {
     Finished,
 }
 
+#[derive(Clone)]
 pub struct LzmaParams {
     // most lc significant bits of previous byte are part of the literal context
-    lc: u32, // 0..8
-    lp: u32, // 0..4
+    pub lc: u32, // 0..8
+    pub lp: u32, // 0..4
     // context for literal/match is plaintext offset modulo 2^pb
-    pb: u32, // 0..4
-    dict_size: u32,
-    unpacked_size: Option<u64>,
+    pub pb: u32, // 0..4
+    pub dict_size: u32,
+    pub unpacked_size: Option<u64>,
 }
 
 impl LzmaParams {
@@ -130,14 +131,9 @@ where
     _phantom: PhantomData<W>,
     // Buffer input data here if we need more for decompression. Up to
     // MAX_REQUIRED_INPUT bytes can be consumed during one iteration.
+    pub params: Option<LzmaParams>,
     partial_input_buf: io::Cursor<[u8; MAX_REQUIRED_INPUT]>,
     pub output: LZB,
-    // most lc significant bits of previous byte are part of the literal context
-    pub lc: u32, // 0..8
-    pub lp: u32, // 0..4
-    // context for literal/match is plaintext offset modulo 2^pb
-    pub pb: u32, // 0..4
-    pub unpacked_size: Option<u64>,
     literal_probs: [[u16; 0x300]; PROBS_MEM_LIMIT],
     pos_slot_decoder: [rangecoder::BitTree<64>; 4],
     align_decoder: rangecoder::BitTree<16>,
@@ -154,33 +150,27 @@ where
     rep_len_decoder: rangecoder::LenDecoder,
 }
 
+impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Default
+    for DecoderState<W, lzbuffer::LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>
+where
+    W: io::Write,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
     DecoderState<W, lzbuffer::LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>
 where
     W: io::Write,
 {
-    pub fn new(params: LzmaParams) -> error::Result<Self> {
-        let dict_size = params.dict_size as usize;
-        if dict_size > DICT_MEM_LIMIT {
-            return Err(error::Error::DictionaryBufferTooSmall {
-                needed: dict_size,
-                available: DICT_MEM_LIMIT,
-            });
-        }
-        if (1 << (params.lc + params.lp)) > PROBS_MEM_LIMIT {
-            return Err(error::Error::ProbabilitiesBufferTooSmall {
-                needed: 1 << (params.lc + params.lp),
-                available: PROBS_MEM_LIMIT,
-            });
-        }
-        Ok(Self {
+    pub fn new() -> Self {
+        Self {
             _phantom: PhantomData,
-            output: lzbuffer::LzCircularBuffer::new(dict_size),
+            output: lzbuffer::LzCircularBuffer::new(),
             partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
-            lc: params.lc,
-            lp: params.lp,
-            pb: params.pb,
-            unpacked_size: params.unpacked_size,
+            params: None,
             literal_probs: [[0x400; 0x300]; PROBS_MEM_LIMIT],
             pos_slot_decoder: [Default::default(); 4],
             align_decoder: Default::default(),
@@ -195,7 +185,7 @@ where
             rep: [0; 4],
             len_decoder: Default::default(),
             rep_len_decoder: Default::default(),
-        })
+        }
     }
 }
 
@@ -204,35 +194,40 @@ where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
 {
-    pub fn reset_state(&mut self, lc: u32, lp: u32, pb: u32) -> error::Result<()> {
-        if (1 << (lc + lp)) > (1 << (self.lc + self.lp)) {
+    pub fn set_params(&mut self, params: LzmaParams) -> error::Result<()> {
+        if (1 << (params.lc + params.lp)) > PROBS_MEM_LIMIT {
             return Err(error::Error::ProbabilitiesBufferTooSmall {
-                needed: 1 << (lc + lp),
+                needed: 1 << (params.lc + params.lp),
                 available: PROBS_MEM_LIMIT,
             });
         }
-        self.lc = lc;
-        self.lp = lp;
-        self.pb = pb;
-        self.literal_probs = [[0x400; 0x300]; PROBS_MEM_LIMIT];
-        self.pos_slot_decoder = [Default::default(); 4];
+        self.output.set_dict_size(params.dict_size as usize)?;
+        self.params = Some(params);
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        self.output.reset();
+        self.partial_input_buf = io::Cursor::new([0; MAX_REQUIRED_INPUT]);
+        self.params = None;
+        self.literal_probs
+            .iter_mut()
+            .for_each(|v| v.iter_mut().for_each(|v| *v = 0x400));
+        self.pos_slot_decoder
+            .iter_mut()
+            .for_each(|v| *v = Default::default());
         self.align_decoder = Default::default();
-        self.pos_decoders = [0x400; 115];
-        self.is_match = [0x400; 192];
-        self.is_rep = [0x400; 12];
-        self.is_rep_g0 = [0x400; 12];
-        self.is_rep_g1 = [0x400; 12];
-        self.is_rep_g2 = [0x400; 12];
-        self.is_rep_0long = [0x400; 192];
+        self.pos_decoders.iter_mut().for_each(|v| *v = 0x400);
+        self.is_match.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_g0.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_g1.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_g2.iter_mut().for_each(|v| *v = 0x400);
+        self.is_rep_0long.iter_mut().for_each(|v| *v = 0x400);
         self.state = 0;
         self.rep = [0; 4];
         self.len_decoder = Default::default();
         self.rep_len_decoder = Default::default();
-        Ok(())
-    }
-
-    pub fn set_unpacked_size(&mut self, unpacked_size: Option<u64>) {
-        self.unpacked_size = unpacked_size;
     }
 
     pub fn process<'a, R: io::BufRead>(
@@ -264,7 +259,11 @@ where
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<ProcessingStatus> {
-        let pos_state = self.output.len() & ((1 << self.pb) - 1);
+        let params = self
+            .params
+            .clone()
+            .unwrap_or_else(|| panic!("DecoderState::params is not initialized"));
+        let pos_state = self.output.len() & ((1 << params.pb) - 1);
 
         // Literal
         if !rangecoder.decode_bit(
@@ -421,8 +420,12 @@ where
         mut rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         mode: ProcessingMode,
     ) -> error::Result<()> {
+        let params = self
+            .params
+            .clone()
+            .unwrap_or_else(|| panic!("DecoderState::params is not initialized"));
         loop {
-            if let Some(unpacked_size) = self.unpacked_size {
+            if let Some(unpacked_size) = params.unpacked_size {
                 if self.output.len() as u64 >= unpacked_size {
                     break;
                 }
@@ -496,7 +499,7 @@ where
             }
         }
 
-        if let Some(len) = self.unpacked_size {
+        if let Some(len) = params.unpacked_size {
             if mode == ProcessingMode::Finish && len != self.output.len() as u64 {
                 return Err(error::Error::LzmaError(
                     "Expected unpacked size of {len} but decompressed to {self.output.len()}",
@@ -512,12 +515,16 @@ where
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<u8> {
+        let params = self
+            .params
+            .clone()
+            .unwrap_or_else(|| panic!("DecoderState::params is not initialized"));
         let def_prev_byte = 0u8;
         let prev_byte = self.output.last_or(def_prev_byte) as usize;
 
         let mut result: usize = 1;
-        let lit_state =
-            ((self.output.len() & ((1 << self.lp) - 1)) << self.lc) + (prev_byte >> (8 - self.lc));
+        let lit_state = ((self.output.len() & ((1 << params.lp) - 1)) << params.lc)
+            + (prev_byte >> (8 - params.lc));
         let probs = &mut self.literal_probs[lit_state];
 
         if self.state >= 7 {

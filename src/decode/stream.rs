@@ -26,31 +26,22 @@ const MAX_TMP_LEN: usize = MAX_HEADER_LEN + START_BYTES;
 /// Internal state of this streaming decoder. This is needed because we have to
 /// initialize the stream before processing any data.
 #[derive(Debug)]
-enum State<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
-where
-    W: Write,
-{
+enum State<const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> {
     /// Stream is initialized but header values have not yet been read.
     Header,
     /// Header values have been read and the stream is ready to process more
     /// data.
-    Data(RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>),
+    Data(RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>),
 }
 
 /// Structures needed while decoding data.
-struct RunState<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
-where
-    W: Write,
-{
-    decoder: DecoderState<W, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
+struct RunState<const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> {
     range: u32,
     code: u32,
 }
 
-impl<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
-    for RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
-where
-    W: Write,
+impl<const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize> Debug
+    for RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>
 {
     fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
         fmt.debug_struct("RunState")
@@ -77,12 +68,13 @@ pub struct Stream<W, const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
 where
     W: Write,
 {
+    decoder: DecoderState<W, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
     /// Temporary buffer to hold data while the header is being read.
     tmp: Cursor<[u8; MAX_TMP_LEN]>,
     /// Whether the stream is initialized and ready to process data.
     /// An `Option` is used to avoid interior mutability when updating the
     /// state.
-    state: Option<State<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>>,
+    state: Option<State<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>>,
     /// Options given when a stream is created.
     options: Options,
 }
@@ -103,16 +95,23 @@ where
     /// receive decompressed bytes.
     pub fn new_with_options(options: &Options) -> Self {
         Self {
+            decoder: Default::default(),
             tmp: Cursor::new([0; MAX_TMP_LEN]),
             state: Some(State::Header),
             options: *options,
         }
     }
 
+    pub fn reset(&mut self) {
+        self.decoder.reset();
+        self.tmp = Cursor::new([0; MAX_TMP_LEN]);
+        self.state = Some(State::Header);
+    }
+
     /// Consumes the stream and returns the output sink. This also makes sure
     /// we have properly reached the end of the stream.
-    pub fn finish(mut self, output: &mut W) -> crate::error::Result<()> {
-        if let Some(state) = self.state.take() {
+    pub fn finish(&mut self, output: &mut W) -> crate::error::Result<()> {
+        let finish_status = if let Some(state) = self.state.take() {
             match state {
                 State::Header => {
                     if self.tmp.position() > 0 {
@@ -122,17 +121,16 @@ where
                     }
                 }
                 State::Data(mut state) => {
-                    if !self.options.allow_incomplete {
-                        // Process one last time with empty input to force end of
-                        // stream checks
-                        let mut stream =
-                            Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                        let mut range_decoder =
-                            RangeDecoder::from_parts(&mut stream, state.range, state.code);
-                        state.decoder.process(output, &mut range_decoder)?;
-                    }
-                    let output = state.decoder.output.finish(output)?;
-                    Ok(())
+                    // Process one last time with empty input to force end of
+                    // stream checks
+                    let mut stream =
+                        Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
+                    let mut range_decoder =
+                        RangeDecoder::from_parts(&mut stream, state.range, state.code);
+                    self.decoder
+                        .process(output, &mut range_decoder)
+                        .and(self.decoder.output.finish(output).map_err(|e| e.into()))
+                        .and(Ok(()))
                 }
             }
         } else {
@@ -140,7 +138,9 @@ where
             Err(Error::LzmaError(
                 "can't finish stream because of previous write error",
             ))
-        }
+        };
+        self.reset();
+        finish_status
     }
 
     /// Attempts to read the header and transition into a running state.
@@ -148,17 +148,17 @@ where
     /// This function will consume the state, returning the next state on both
     /// error and success.
     fn read_header<R: BufRead>(
+        decoder: &mut DecoderState<W, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
         mut input: &mut R,
         options: &Options,
-    ) -> crate::error::Result<State<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
+    ) -> crate::error::Result<State<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
         match LzmaParams::read_header(&mut input, options) {
             Ok(params) => {
                 // The RangeDecoder is only kept temporarily as we are processing
                 // chunks of data.
                 if let Ok(rangecoder) = RangeDecoder::new(&mut input) {
-                    let decoder = DecoderState::new(params)?;
+                    decoder.set_params(params)?;
                     Ok(State::Data(RunState {
-                        decoder,
                         range: rangecoder.range,
                         code: rangecoder.code,
                     }))
@@ -177,22 +177,21 @@ where
 
     /// Process compressed data
     fn read_data<R: BufRead>(
-        mut state: RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
+        decoder: &mut DecoderState<W, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
+        mut state: RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
         output: &mut W,
         mut input: &mut R,
-    ) -> io::Result<RunState<W, DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
+    ) -> io::Result<RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
         // Construct our RangeDecoder from the previous range and code
         // values.
         let mut rangecoder = RangeDecoder::from_parts(&mut input, state.range, state.code);
 
         // Try to process all bytes of data.
-        state
-            .decoder
+        decoder
             .process_stream(output, &mut rangecoder)
             .map_err(|e| -> io::Error { e.into() })?;
 
         Ok(RunState {
-            decoder: state.decoder,
             range: rangecoder.range,
             code: rangecoder.code,
         })
@@ -224,7 +223,11 @@ where
                         let (position, res) = {
                             let mut tmp_input =
                                 Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                            let res = Stream::read_header(&mut tmp_input, &self.options);
+                            let res = Stream::read_header(
+                                &mut self.decoder,
+                                &mut tmp_input,
+                                &self.options,
+                            );
                             (tmp_input.position(), res)
                         };
 
@@ -240,7 +243,7 @@ where
                         }
                         res
                     } else {
-                        Stream::read_header(&mut input, &self.options)
+                        Stream::read_header(&mut self.decoder, &mut input, &self.options)
                     };
 
                     match res {
@@ -281,13 +284,19 @@ where
                     let state = if self.tmp.position() > 0 {
                         let mut tmp_input =
                             Cursor::new(&self.tmp.get_ref()[0..self.tmp.position() as usize]);
-                        let res = Stream::read_data(state, output, &mut tmp_input)?;
+                        let res =
+                            Stream::read_data(&mut self.decoder, state, output, &mut tmp_input)?;
                         self.tmp.set_position(0);
                         res
                     } else {
                         state
                     };
-                    State::Data(Stream::read_data(state, output, &mut input)?)
+                    State::Data(Stream::read_data(
+                        &mut self.decoder,
+                        state,
+                        output,
+                        &mut input,
+                    )?)
                 }
             };
             self.state.replace(state);
@@ -317,10 +326,15 @@ where
         use StreamStatus::*;
         match &self.state {
             Some(Header) => ProcessingHeader,
-            Some(Data(run_state)) => {
-                let unpacked_size = run_state.decoder.unpacked_size;
+            Some(Data(_)) => {
+                let unpacked_size = self
+                    .decoder
+                    .params
+                    .clone()
+                    .unwrap_or_else(|| panic!("DecoderState::params is not initialized"))
+                    .unpacked_size;
                 let unpacked_data_processed =
-                    LzBuffer::<W>::len(&run_state.decoder.output) as u64 + self.tmp.position();
+                    LzBuffer::<W>::len(&self.decoder.output) as u64 + self.tmp.position();
                 if let Some(unpacked_size) = unpacked_size {
                     if unpacked_size == unpacked_data_processed {
                         return Finished;

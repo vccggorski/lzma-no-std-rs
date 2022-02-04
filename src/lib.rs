@@ -23,6 +23,8 @@ pub mod decompress {
     pub use crate::decode::options::*;
     #[cfg(feature = "stream")]
     pub use crate::decode::stream::Stream;
+    #[cfg(feature = "stream")]
+    pub use crate::decode::stream::StreamStatus;
 }
 
 /// Decompress LZMA data with default
@@ -58,9 +60,8 @@ pub fn lzma_decompress_with_options<
     use crate::decode::lzbuffer::LzCircularBuffer;
     let params = decode::lzma::LzmaParams::read_header(input, options)?;
     let mut decoder =
-        decode::lzma::DecoderState::<_, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>::new(
-            params,
-        )?;
+        decode::lzma::DecoderState::<_, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>::new();
+    decoder.set_params(params)?;
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
         .map_err(|e| error::Error::LzmaError("LZMA stream too short: {e}"))?;

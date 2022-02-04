@@ -6,12 +6,6 @@ pub struct Options {
     /// The default is
     /// [`UnpackedSize::ReadFromHeader`](enum.UnpackedSize.html#variant.ReadFromHeader).
     pub unpacked_size: UnpackedSize,
-    /// Determines whether to bypass end of stream validation.
-    ///
-    /// This option only applies to the [`Stream`](struct.Stream.html) API.
-    ///
-    /// The default is false (always do completion check).
-    pub allow_incomplete: bool,
 }
 
 /// Alternatives for defining the unpacked size of the decoded data.
