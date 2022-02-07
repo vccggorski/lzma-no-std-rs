@@ -124,7 +124,7 @@ where
 
         // Flush the circular buffer to the output
         if self.cursor == dict_size {
-            stream.write_all(self.buf.as_slice())?;
+            stream.write_all(&self.buf[..self.cursor])?;
             self.cursor = 0;
         }
 
@@ -163,7 +163,7 @@ where
     // Consumes this buffer and flushes any data
     fn finish(&mut self, stream: &mut W) -> io::Result<()> {
         if self.cursor > 0 {
-            stream.write_all(&self.buf[0..self.cursor])?;
+            stream.write_all(&self.buf[..self.cursor])?;
             stream.flush()?;
         }
         LzBuffer::<W>::reset(self);
@@ -171,7 +171,7 @@ where
     }
 
     fn reset(&mut self) {
-        self.buf.truncate(0);
+        self.buf.iter_mut().for_each(|v| *v = 0);
         self.dict_size = None;
         self.cursor = 0;
         self.len = 0;
