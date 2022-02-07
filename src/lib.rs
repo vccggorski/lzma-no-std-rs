@@ -2,9 +2,8 @@
 //! & stream based)
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![allow(warnings)]
-#![warn(missing_docs)]
-#![warn(missing_debug_implementations)]
+#![allow(missing_docs)]
+#![allow(missing_debug_implementations)]
 #![deny(unsafe_code)]
 
 #[macro_use]
@@ -73,13 +72,14 @@ pub fn lzma_decompress_with_options<
     decoder.set_params(params)?;
 
     let mut rangecoder = decode::rangecoder::RangeDecoder::new(input)
-        .map_err(|e| error::lzma::LzmaError::DataStreamIsTooShort)?;
+        .map_err(|_| error::lzma::LzmaError::DataStreamIsTooShort)?;
     decoder.process(output, &mut rangecoder)?;
     decoder.output.finish(output)?;
     Ok(())
 }
 
 /// Compresses data with LZMA and default [`Options`](compress/struct.Options.html).
+/// Kept for tests
 #[cfg(feature = "std")]
 pub fn lzma_compress<R: io::BufRead, W: io::Write>(
     input: &mut R,
@@ -89,6 +89,7 @@ pub fn lzma_compress<R: io::BufRead, W: io::Write>(
 }
 
 /// Compress LZMA data with the provided options.
+/// Kept for tests
 #[cfg(feature = "std")]
 pub fn lzma_compress_with_options<R: io::BufRead, W: io::Write>(
     input: &mut R,

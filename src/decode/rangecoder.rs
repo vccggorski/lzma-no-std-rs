@@ -2,8 +2,6 @@ use crate::decode::util;
 use crate::error;
 use crate::io;
 use byteorder::BigEndian;
-use core::iter::repeat;
-use core::iter::FromIterator;
 use io::ReadBytesExt;
 
 pub struct RangeDecoder<'a, R>

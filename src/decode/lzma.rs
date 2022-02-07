@@ -5,8 +5,6 @@ use crate::decompress::UnpackedSize;
 use crate::error;
 use crate::io;
 use byteorder::LittleEndian;
-use core::iter::repeat;
-use core::iter::FromIterator;
 use core::marker::PhantomData;
 use io::ReadBytesExt;
 

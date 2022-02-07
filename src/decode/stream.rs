@@ -120,7 +120,7 @@ where
                         Ok(())
                     }
                 }
-                State::Data(mut state) => {
+                State::Data(state) => {
                     // Process one last time with empty input to force end of
                     // stream checks
                     let mut stream =
@@ -176,7 +176,7 @@ where
     /// Process compressed data
     fn read_data<R: BufRead>(
         decoder: &mut DecoderState<W, LzCircularBuffer<DICT_MEM_LIMIT>, PROBS_MEM_LIMIT>,
-        mut state: RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
+        state: RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
         output: &mut W,
         mut input: &mut R,
     ) -> crate::error::Result<RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
