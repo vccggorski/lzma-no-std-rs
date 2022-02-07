@@ -4,7 +4,6 @@ use crate::io;
 use core::result;
 
 pub mod lzma {
-    use super::*;
     #[derive(PartialEq, Debug)]
     pub enum LzmaError {
         MatchDistanceIsBeyondDictionarySize {

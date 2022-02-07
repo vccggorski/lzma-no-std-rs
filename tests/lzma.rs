@@ -1,11 +1,9 @@
 #![cfg(feature = "std")]
 extern crate lzma;
 
-#[cfg(feature = "enable_logging")]
+#[cfg(feature = "log")]
 use log::{debug, info};
 use std::io::Read;
-#[cfg(feature = "stream")]
-use std::io::Write;
 
 /// Utility function to read a file into memory
 fn read_all_file(filename: &str) -> std::io::Result<Vec<u8>> {
@@ -31,9 +29,9 @@ fn round_trip(x: &[u8]) {
 fn round_trip_no_options(x: &[u8]) {
     let mut compressed: Vec<u8> = Vec::new();
     lzma_rs::lzma_compress(&mut std::io::BufReader::new(x), &mut compressed).unwrap();
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     info!("Compressed {} -> {} bytes", x.len(), compressed.len());
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     debug!("Compressed content: {:?}", compressed);
 
     assert_decomp_eq::<4096>(&compressed, x, /* compare_to_liblzma */ true);
@@ -51,16 +49,16 @@ fn assert_round_trip_with_options(
         encode_options,
     )
     .unwrap();
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     info!("Compressed {} -> {} bytes", x.len(), compressed.len());
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     debug!("Compressed content: {:?}", compressed);
 
     // test non-streaming decompression
     {
         let mut bf = std::io::BufReader::new(compressed.as_slice());
         let mut decomp: Vec<u8> = Vec::new();
-        lzma_rs::lzma_decompress_with_options::<_, _, 4096, 8>(
+        lzma_rs::lzma_decompress_with_options::<_, _, 4096, 66>(
             &mut bf,
             &mut decomp,
             decode_options,
@@ -74,7 +72,7 @@ fn assert_round_trip_with_options(
     {
         let mut sink = Vec::new();
         let mut stream =
-            lzma_rs::decompress::Stream::<_, 4096, 8>::new_with_options(decode_options);
+            lzma_rs::decompress::Stream::<_, 4096, 66>::new_with_options(decode_options);
 
         if let Err(error) = stream.write_all(&mut sink, &compressed) {
             // A WriteZero error may occur if decompression is finished but there
@@ -118,7 +116,7 @@ fn assert_decomp_eq<const DICT_MEM_LIMIT: usize>(
     {
         let mut input = std::io::BufReader::new(compressed);
         let mut decomp: Vec<u8> = Vec::new();
-        lzma_rs::lzma_decompress::<_, _, DICT_MEM_LIMIT, 8>(&mut input, &mut decomp).unwrap();
+        lzma_rs::lzma_decompress::<_, _, DICT_MEM_LIMIT, 66>(&mut input, &mut decomp).unwrap();
         assert_eq!(decomp, expected);
     }
 
@@ -132,7 +130,7 @@ fn assert_decomp_eq<const DICT_MEM_LIMIT: usize>(
     #[cfg(feature = "stream")]
     {
         let mut sink = Vec::new();
-        let mut stream = lzma_rs::decompress::Stream::<_, DICT_MEM_LIMIT, 8>::new();
+        let mut stream = lzma_rs::decompress::Stream::<_, DICT_MEM_LIMIT, 66>::new();
         stream.write_all(&mut sink, compressed).unwrap();
         stream.finish(&mut sink).unwrap();
         assert_eq!(sink, expected);
@@ -140,7 +138,7 @@ fn assert_decomp_eq<const DICT_MEM_LIMIT: usize>(
         const CHUNK_SIZES: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8, 16, 32, 64, 128, 256, 512, 1024];
         for &chunk_size in CHUNK_SIZES {
             let mut sink = Vec::new();
-            let mut stream = lzma_rs::decompress::Stream::<_, DICT_MEM_LIMIT, 8>::new();
+            let mut stream = lzma_rs::decompress::Stream::<_, DICT_MEM_LIMIT, 66>::new();
             for chunk in compressed.chunks(chunk_size) {
                 stream.write_all(&mut sink, chunk).unwrap();
             }
@@ -153,16 +151,16 @@ fn assert_decomp_eq<const DICT_MEM_LIMIT: usize>(
 #[test]
 #[should_panic(expected = "HeaderTooShort")]
 fn decompress_short_header() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     let mut decomp: Vec<u8> = Vec::new();
     // TODO: compare io::Errors?
-    lzma_rs::lzma_decompress::<_, _, 4096, 8>(&mut (b"" as &[u8]), &mut decomp).unwrap();
+    lzma_rs::lzma_decompress::<_, _, 4096, 66>(&mut (b"" as &[u8]), &mut decomp).unwrap();
 }
 
 #[test]
 fn round_trip_basics() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     round_trip(b"");
     // Note: we use vec! to avoid storing the slice in the binary
@@ -172,14 +170,14 @@ fn round_trip_basics() {
 
 #[test]
 fn round_trip_hello() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     round_trip(b"Hello world");
 }
 
 #[test]
 fn round_trip_files() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     round_trip_file("tests/files/foo.txt");
     round_trip_file("tests/files/range-coder-edge-case");
@@ -187,7 +185,7 @@ fn round_trip_files() {
 
 #[test]
 fn decompress_big_file() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     let compressed = read_all_file("tests/files/foo.txt.lzma").unwrap();
     let expected = read_all_file("tests/files/foo.txt").unwrap();
@@ -196,7 +194,7 @@ fn decompress_big_file() {
 
 #[test]
 fn decompress_big_file_with_huge_dict() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     let compressed = read_all_file("tests/files/hugedict.txt.lzma").unwrap();
     let expected = read_all_file("tests/files/foo.txt").unwrap();
@@ -205,7 +203,7 @@ fn decompress_big_file_with_huge_dict() {
 
 #[test]
 fn decompress_range_coder_edge_case() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     let compressed = read_all_file("tests/files/range-coder-edge-case.lzma").unwrap();
     let expected = read_all_file("tests/files/range-coder-edge-case").unwrap();
@@ -214,7 +212,7 @@ fn decompress_range_coder_edge_case() {
 
 #[test]
 fn decompress_empty_world() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     assert_decomp_eq::<4096>(
         b"\x5d\x00\x10\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x83\xff\
@@ -226,7 +224,7 @@ fn decompress_empty_world() {
 
 #[test]
 fn decompress_hello_world() {
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     assert_decomp_eq::<4096>(
         b"\x5d\x00\x10\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x24\x19\
@@ -240,7 +238,7 @@ fn decompress_hello_world() {
 #[test]
 fn decompress_huge_dict() {
     // Hello world with a dictionary of size 0x7d00
-    #[cfg(feature = "enable_logging")]
+    #[cfg(feature = "log")]
     let _ = env_logger::try_init();
     assert_decomp_eq::<32_000>(
         b"\x5d\x00\x7d\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x24\x19\
@@ -358,7 +356,7 @@ fn memlimit() {
     {
         let mut bf = std::io::BufReader::new(compressed.as_slice());
         let mut decomp: Vec<u8> = Vec::new();
-        let error = lzma_rs::lzma_decompress_with_options::<_, _, 1, 8>(
+        let error = lzma_rs::lzma_decompress_with_options::<_, _, 1, 66>(
             &mut bf,
             &mut decomp,
             &decode_options,
@@ -396,7 +394,7 @@ fn memlimit() {
     {
         let mut sink = Vec::new();
         let mut stream =
-            lzma_rs::decompress::Stream::<_, 1, 8>::new_with_options(&decode_options);
+            lzma_rs::decompress::Stream::<_, 1, 66>::new_with_options(&decode_options);
 
         let error = stream.write_all(&mut sink, &compressed).unwrap_err();
         match error {
