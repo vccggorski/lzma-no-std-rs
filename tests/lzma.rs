@@ -1,4 +1,3 @@
-// TODO: restore this test
 #![cfg(feature = "std")]
 extern crate lzma;
 
@@ -344,26 +343,72 @@ fn memlimit() {
     {
         let mut bf = std::io::BufReader::new(compressed.as_slice());
         let mut decomp: Vec<u8> = Vec::new();
-        let error = lzma_rs::lzma_decompress_with_options::<_, _, 1, 0>(
+        let error = lzma_rs::lzma_decompress_with_options::<_, _, 4096, 0>(
             &mut bf,
             &mut decomp,
             &decode_options,
         )
         .unwrap_err();
 
-        todo!("Assert against proper error type");
+        match error {
+            lzma_rs::error::Error::ProbabilitiesBufferTooSmall { .. } => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
+    }
+    {
+        let mut bf = std::io::BufReader::new(compressed.as_slice());
+        let mut decomp: Vec<u8> = Vec::new();
+        let error = lzma_rs::lzma_decompress_with_options::<_, _, 1, 8>(
+            &mut bf,
+            &mut decomp,
+            &decode_options,
+        )
+        .unwrap_err();
+
+        match error {
+            lzma_rs::error::Error::DictionaryBufferTooSmall { .. } => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
     }
 
     #[cfg(feature = "stream")]
     // test streaming decompression
     {
         let mut sink = Vec::new();
-        let mut stream = lzma_rs::decompress::Stream::<_, 1, 0>::new_with_options(&decode_options);
+        let mut stream =
+            lzma_rs::decompress::Stream::<_, 4096, 0>::new_with_options(&decode_options);
 
         let error = stream.write_all(&mut sink, &compressed).unwrap_err();
-        todo!("Assert against proper error type");
+        match error {
+            lzma_rs::error::Error::ProbabilitiesBufferTooSmall { .. } => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
 
-        let error = stream.finish(&mut sink).unwrap_err();
-        todo!("Assert against proper error type");
+        match stream.finish(&mut sink).unwrap_err() {
+            lzma_rs::error::Error::StreamError(
+                lzma_rs::error::stream::StreamError::InvalidState,
+            ) => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
+    }
+    #[cfg(feature = "stream")]
+    // test streaming decompression
+    {
+        let mut sink = Vec::new();
+        let mut stream =
+            lzma_rs::decompress::Stream::<_, 1, 8>::new_with_options(&decode_options);
+
+        let error = stream.write_all(&mut sink, &compressed).unwrap_err();
+        match error {
+            lzma_rs::error::Error::DictionaryBufferTooSmall { .. } => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
+
+        match stream.finish(&mut sink).unwrap_err() {
+            lzma_rs::error::Error::StreamError(
+                lzma_rs::error::stream::StreamError::InvalidState,
+            ) => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
     }
 }

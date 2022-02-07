@@ -1,4 +1,3 @@
-// TODO: Proper error handling needed for tests
 use crate::decode::lzbuffer::{LzBuffer, LzCircularBuffer};
 use crate::decode::lzma::{DecoderState, LzmaParams};
 use crate::decode::rangecoder::RangeDecoder;
