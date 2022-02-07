@@ -50,12 +50,6 @@ impl<const MEM_LIMIT: usize> LzCircularBuffer<MEM_LIMIT> {
 
     fn set(&mut self, index: usize, value: u8) -> error::Result<()> {
         let new_len = index + 1;
-
-        if self.buf.len() < new_len {
-            return Err(error::Error::LzmaError(
-                "exceeded memory limit of {MEM_LIMIT}",
-            ));
-        }
         self.buf[index] = value;
         Ok(())
     }
@@ -94,22 +88,30 @@ where
     }
 
     // Retrieve the n-th last byte
-    fn last_n(&self, dist: usize) -> error::Result<u8> {
+    fn last_n(&self, distance: usize) -> error::Result<u8> {
         let dict_size = self
             .dict_size
             .unwrap_or_else(|| panic!("LzCircularBuffer::dict_size is not initialized"));
-        if dist > dict_size {
-            return Err(error::Error::LzmaError(
-                "Match distance {dist} is beyond dictionary size {dict_size}",
-            ));
+        if distance > dict_size {
+            return Err(
+                error::lzma::LzmaError::MatchDistanceIsBeyondDictionarySize {
+                    distance,
+                    dict_size,
+                }
+                .into(),
+            );
         }
-        if dist > self.len {
-            return Err(error::Error::LzmaError(
-                "Match distance {dist} is beyond output size {self.len}",
-            ));
+        if distance > self.len {
+            return Err(
+                error::lzma::LzmaError::MatchDistanceIsBeyondOutputSize {
+                    distance,
+                    output_len: self.len,
+                }
+                .into(),
+            );
         }
 
-        let offset = (dict_size + self.cursor - dist) % dict_size;
+        let offset = (dict_size + self.cursor - distance) % dict_size;
         Ok(self.get(offset))
     }
 
@@ -132,23 +134,31 @@ where
     }
 
     // Fetch an LZ sequence (length, distance) from inside the buffer
-    fn append_lz(&mut self, stream: &mut W, len: usize, dist: usize) -> error::Result<()> {
+    fn append_lz(&mut self, stream: &mut W, len: usize, distance: usize) -> error::Result<()> {
         let dict_size = self
             .dict_size
             .unwrap_or_else(|| panic!("LzCircularBuffer::dict_size is not initialized"));
-        lzma_debug!("LZ {{ len: {}, dist: {} }}", len, dist);
-        if dist > dict_size {
-            return Err(error::Error::LzmaError(
-                "LZ distance {dist} is beyond dictionary size {dict_size}",
-            ));
+        lzma_debug!("LZ {{ len: {}, distance: {} }}", len, distance);
+        if distance > dict_size {
+            return Err(
+                error::lzma::LzmaError::LzDistanceIsBeyondDictionarySize {
+                    distance,
+                    dict_size,
+                }
+                .into(),
+            );
         }
-        if dist > self.len {
-            return Err(error::Error::LzmaError(
-                "LZ distance {dist} is beyond output size {self.len}",
-            ));
+        if distance > self.len {
+            return Err(
+                error::lzma::LzmaError::LzDistanceIsBeyondOutputSize {
+                    distance,
+                    output_len: self.len,
+                }
+                .into(),
+            );
         }
 
-        let mut offset = (dict_size + self.cursor - dist) % dict_size;
+        let mut offset = (dict_size + self.cursor - distance) % dict_size;
         for _ in 0..len {
             let x = self.get(offset);
             self.append_literal(stream, x)?;

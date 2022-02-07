@@ -3,7 +3,7 @@ use crate::decode::lzbuffer::{LzBuffer, LzCircularBuffer};
 use crate::decode::lzma::{DecoderState, LzmaParams};
 use crate::decode::rangecoder::RangeDecoder;
 use crate::decompress::Options;
-use crate::error::Error;
+use crate::error;
 use crate::io::{self, BufRead, Cursor, Read, Write};
 use core::fmt::Debug;
 
@@ -116,7 +116,7 @@ where
             match state {
                 State::Header => {
                     if self.tmp.position() > 0 {
-                        Err(Error::LzmaError("failed to read header"))
+                        Err(error::stream::StreamError::FailedToReadLzmaHeader.into())
                     } else {
                         Ok(())
                     }
@@ -136,9 +136,7 @@ where
             }
         } else {
             // this will occur if a call to `write()` fails
-            Err(Error::LzmaError(
-                "can't finish stream because of previous write error",
-            ))
+            Err(error::stream::StreamError::InvalidState.into())
         };
         self.reset();
         finish_status
@@ -170,7 +168,7 @@ where
                 }
             }
             // Failed to read_header() because we need more data, try again later.
-            Err(Error::HeaderTooShort(_)) => Ok(State::Header),
+            Err(error::Error::HeaderTooShort(_)) => Ok(State::Header),
             // Fatal error. Don't retry.
             Err(e) => Err(e),
         }
@@ -182,15 +180,13 @@ where
         mut state: RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>,
         output: &mut W,
         mut input: &mut R,
-    ) -> io::Result<RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
+    ) -> crate::error::Result<RunState<DICT_MEM_LIMIT, PROBS_MEM_LIMIT>> {
         // Construct our RangeDecoder from the previous range and code
         // values.
         let mut rangecoder = RangeDecoder::from_parts(&mut input, state.range, state.code);
 
         // Try to process all bytes of data.
-        decoder
-            .process_stream(output, &mut rangecoder)
-            .map_err(|e| -> io::Error { e.into() })?;
+        decoder.process_stream(output, &mut rangecoder)?;
 
         Ok(RunState {
             range: rangecoder.range,
@@ -198,7 +194,7 @@ where
         })
     }
 
-    pub fn write(&mut self, output: &mut W, data: &[u8]) -> io::Result<usize> {
+    pub fn write(&mut self, output: &mut W, data: &[u8]) -> crate::error::Result<usize> {
         let mut input = Cursor::new(data);
 
         if let Some(state) = self.state.take() {
@@ -216,7 +212,8 @@ where
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
                                 "Failed to convert integer to u64.",
-                            ));
+                            )
+                            .into());
                         };
                         self.tmp.set_position(position + bytes_read);
 
@@ -245,12 +242,12 @@ where
                         res
                     } else {
                         Stream::read_header(&mut self.decoder, &mut input, &self.options)
-                    };
+                    }?;
 
                     match res {
                         // occurs when not enough input bytes were provided to
                         // read the entire header
-                        Ok(State::Header) => {
+                        State::Header => {
                             if self.tmp.position() == 0 {
                                 // reset the cursor because we may have partial reads
                                 input.set_position(0);
@@ -261,7 +258,8 @@ where
                                     return Err(io::Error::new(
                                         io::ErrorKind::Other,
                                         "Failed to convert integer to u64.",
-                                    ));
+                                    )
+                                    .into());
                                 };
                                 self.tmp.set_position(bytes_read);
                             }
@@ -270,13 +268,7 @@ where
 
                         // occurs when the header was successfully read and we
                         // move on to the next state
-                        Ok(State::Data(val)) => State::Data(val),
-
-                        // occurs when the output was consumed due to a
-                        // non-recoverable error
-                        Err(e) => {
-                            todo!("Update error handling");
-                        }
+                        State::Data(val) => State::Data(val),
                     }
                 }
 
@@ -305,17 +297,17 @@ where
         Ok(input.position() as usize)
     }
 
-    pub fn write_all(&mut self, output: &mut W, mut buf: &[u8]) -> io::Result<()> {
+    pub fn write_all(&mut self, output: &mut W, mut buf: &[u8]) -> crate::error::Result<()> {
         while !buf.is_empty() {
             match self.write(output, buf) {
                 Ok(0) => {
                     return Err(io::Error::new(
                         io::ErrorKind::WriteZero,
                         "failed to write whole buffer",
-                    ));
+                    )
+                    .into());
                 }
                 Ok(n) => buf = &buf[n..],
-                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(e),
             }
         }
@@ -365,12 +357,6 @@ where
     }
 }
 
-impl From<Error> for io::Error {
-    fn from(error: Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, "{error:?}")
-    }
-}
-
 #[cfg(all(test, feature = "std"))]
 mod test {
     use super::*;
@@ -401,16 +387,23 @@ mod test {
 
     /// Test a bad header value
     #[test]
-    #[should_panic(expected = "LZMA header invalid properties: 255 must be < 225")]
     fn test_bad_header() {
         let input = [255u8; 32];
 
         let mut sink = Vec::new();
         let mut stream = Stream::<_, 4096, 8>::new();
 
-        stream.write_all(&mut sink, &input[..]).unwrap();
+        match stream.write_all(&mut sink, &input[..]).unwrap_err() {
+            error::Error::LzmaError(error::lzma::LzmaError::InvalidHeader {
+                invalid_properties: 255,
+            }) => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
 
-        stream.finish(&mut sink).unwrap();
+        match stream.finish(&mut sink).unwrap_err() {
+            error::Error::StreamError(error::stream::StreamError::InvalidState) => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
 
         assert!(sink.is_empty());
     }
@@ -418,7 +411,7 @@ mod test {
     /// Test processing only partial data
     #[test]
     fn test_stream_incomplete() {
-        let input = b"\x5d\x00\x00\x80\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x83\xff\
+        let input = b"\x5d\x00\x10\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x83\xff\
                       \xfb\xff\xff\xc0\x00\x00\x00";
         // Process until this index is reached.
         let mut end = 1u64;
@@ -432,9 +425,10 @@ mod test {
             stream.write_all(&mut sink, &input[..end as usize]).unwrap();
             assert_eq!(stream.tmp.position(), end);
 
-            let err = stream.finish(&mut sink).unwrap_err();
-
-            todo!("Assert against proper error type");
+            match stream.finish(&mut sink).unwrap_err() {
+                error::Error::StreamError(error::stream::StreamError::FailedToReadLzmaHeader) => {}
+                err => panic!("Unexpected error: {:#?}", err),
+            }
 
             end += 1;
         }
@@ -451,9 +445,12 @@ mod test {
                 assert_eq!(stream.tmp.position(), end);
             }
 
-            let err = stream.finish(&mut sink).unwrap_err();
-
-            todo!("Assert against proper error type");
+            match stream.finish(&mut sink).unwrap_err() {
+                error::Error::IoError(io_error) => {
+                    assert!(io_error.to_string().contains("failed to fill whole buffer"))
+                }
+                err => panic!("Unexpected error: {:#?}", err),
+            }
 
             end += 1;
         }
@@ -469,7 +466,7 @@ mod test {
         crate::lzma_compress(&mut reader, &mut small_input_compressed).unwrap();
 
         let input : Vec<(&[u8], &[u8])> = vec![
-            (b"\x5d\x00\x00\x80\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x83\xff\xfb\xff\xff\xc0\x00\x00\x00", b""),
+            (b"\x5d\x00\x10\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x83\xff\xfb\xff\xff\xc0\x00\x00\x00", b""),
             (&small_input_compressed[..], small_input)];
         for (input, expected) in input {
             for chunk in 1..input.len() {
@@ -491,11 +488,13 @@ mod test {
     fn test_stream_corrupted() {
         let mut sink = Vec::new();
         let mut stream = Stream::<_, 4096, 8>::new();
-        let err = stream
+        let _ = stream
             .write_all(&mut sink, b"corrupted bytes here corrupted bytes here")
             .unwrap_err();
-        assert!(err.to_string().contains("beyond output size"));
-        let err = stream.finish(&mut sink).unwrap_err();
-        todo!("Assert against proper error type");
+
+        match stream.finish(&mut sink).unwrap_err() {
+            error::Error::StreamError(error::stream::StreamError::InvalidState) => {}
+            err => panic!("Unexpected error: {:#?}", err),
+        }
     }
 }

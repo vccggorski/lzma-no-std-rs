@@ -83,16 +83,20 @@ fn assert_round_trip_with_options(
             // This is the case when the unpacked size is encoded as unknown but
             // provided when decoding. I.e. the 5 or 6 byte end-of-stream marker
             // is not read.
-            if error.kind() == std::io::ErrorKind::WriteZero {
-                match (encode_options.unpacked_size, decode_options.unpacked_size) {
-                    (
-                        lzma_rs::compress::UnpackedSize::WriteToHeader(None),
-                        lzma_rs::decompress::UnpackedSize::ReadHeaderButUseProvided(Some(_)),
-                    ) => {}
-                    _ => panic!("{}", error),
+            if let lzma_rs::error::Error::IoError(error) = error {
+                if error.kind() == std::io::ErrorKind::WriteZero {
+                    match (encode_options.unpacked_size, decode_options.unpacked_size) {
+                        (
+                            lzma_rs::compress::UnpackedSize::WriteToHeader(None),
+                            lzma_rs::decompress::UnpackedSize::ReadHeaderButUseProvided(Some(_)),
+                        ) => {}
+                        _ => panic!("{:?}", error),
+                    }
+                } else {
+                    panic!("{:?}", error);
                 }
             } else {
-                panic!("{}", error);
+                panic!("{:?}", error);
             }
         }
 
@@ -106,7 +110,11 @@ fn round_trip_file(filename: &str) {
     round_trip(x.as_slice());
 }
 
-fn assert_decomp_eq<const DICT_MEM_LIMIT: usize>(compressed: &[u8], expected: &[u8], compare_to_liblzma: bool) {
+fn assert_decomp_eq<const DICT_MEM_LIMIT: usize>(
+    compressed: &[u8],
+    expected: &[u8],
+    compare_to_liblzma: bool,
+) {
     // Test regular decompression.
     {
         let mut input = std::io::BufReader::new(compressed);
@@ -350,8 +358,7 @@ fn memlimit() {
     // test streaming decompression
     {
         let mut sink = Vec::new();
-        let mut stream =
-            lzma_rs::decompress::Stream::<_, 1, 0>::new_with_options(&decode_options);
+        let mut stream = lzma_rs::decompress::Stream::<_, 1, 0>::new_with_options(&decode_options);
 
         let error = stream.write_all(&mut sink, &compressed).unwrap_err();
         todo!("Assert against proper error type");
