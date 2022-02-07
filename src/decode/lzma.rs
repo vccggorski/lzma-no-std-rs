@@ -33,8 +33,8 @@ enum ProcessingMode {
 /// Result of the next iteration of processing.
 ///
 /// Indicates whether processing should continue or is finished.
-#[derive(Debug, PartialEq)]
-enum ProcessingStatus {
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub(crate) enum ProcessingStatus {
     Continue,
     Finished,
 }
@@ -127,6 +127,7 @@ where
     LZB: lzbuffer::LzBuffer<W>,
 {
     _phantom: PhantomData<W>,
+    processing_status: ProcessingStatus,
     // Buffer input data here if we need more for decompression. Up to
     // MAX_REQUIRED_INPUT bytes can be consumed during one iteration.
     pub params: Option<LzmaParams>,
@@ -166,6 +167,7 @@ where
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData,
+            processing_status: ProcessingStatus::Continue,
             output: lzbuffer::LzCircularBuffer::new(),
             partial_input_buf: io::Cursor::new([0; MAX_REQUIRED_INPUT]),
             params: None,
@@ -192,6 +194,10 @@ where
     W: io::Write,
     LZB: lzbuffer::LzBuffer<W>,
 {
+    pub(crate) fn get_processing_status(&self) -> ProcessingStatus {
+        self.processing_status
+    }
+
     pub fn set_params(&mut self, params: LzmaParams) -> error::Result<()> {
         if (1 << (params.lc + params.lp)) > PROBS_MEM_LIMIT {
             return Err(error::Error::ProbabilitiesBufferTooSmall {
@@ -353,6 +359,7 @@ where
                 self.rep[0] = rep_0;
                 if self.rep[0] == 0xFFFF_FFFF {
                     if rangecoder.is_finished_ok()? {
+                        self.processing_status = ProcessingStatus::Finished;
                         return Ok(ProcessingStatus::Finished);
                     }
                     return Err(error::lzma::LzmaError::EosFoundButMoreBytesAvailable.into());

@@ -325,11 +325,25 @@ where
                     .clone()
                     .unwrap_or_else(|| panic!("DecoderState::params is not initialized"))
                     .unpacked_size;
+                // Temporary buffer in `Stream` must be checked; without `Stream::finish` call,
+                // not all bytes might have pushed into the decoder
                 let unpacked_data_processed =
                     LzBuffer::<W>::len(&self.decoder.output) as u64 + self.tmp.position();
+                // TODO: Add tests stressing this; especially considering different decoding
+                // options in `decode::Options::UnpackedSize` If unpacked_size
+
+                // property exists in a header, it dictates decompression state
                 if let Some(unpacked_size) = unpacked_size {
                     if unpacked_size == unpacked_data_processed {
                         return Finished;
+                    }
+                }
+                // Otherwise, finish marker is mandatory
+                else {
+                    use crate::decode::lzma::ProcessingStatus;
+                    match self.decoder.get_processing_status() {
+                        ProcessingStatus::Continue => {}
+                        ProcessingStatus::Finished => return Finished,
                     }
                 }
                 ProcessingData {
