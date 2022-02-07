@@ -1,6 +1,5 @@
 use crate::error;
 use crate::io;
-use heapless::Vec;
 
 pub trait LzBuffer<W>
 where
@@ -25,7 +24,7 @@ where
 
 // A circular buffer for LZ sequences
 pub struct LzCircularBuffer<const MEM_LIMIT: usize> {
-    buf: Vec<u8, MEM_LIMIT>,  // Circular buffer
+    buf: [u8; MEM_LIMIT],  // Circular buffer
     dict_size: Option<usize>, // Length of the buffer
     cursor: usize,            // Current position
     len: usize,               // Total number of bytes sent through the buffer
@@ -33,11 +32,8 @@ pub struct LzCircularBuffer<const MEM_LIMIT: usize> {
 
 impl<const MEM_LIMIT: usize> LzCircularBuffer<MEM_LIMIT> {
     pub fn new() -> Self {
-        let mut buf = Vec::new();
-        buf.resize_default(MEM_LIMIT)
-            .unwrap_or_else(|_| unreachable!("Buffer must be at least MEM_LIMIT"));
         Self {
-            buf,
+            buf: [0_u8; MEM_LIMIT],
             dict_size: None,
             cursor: 0,
             len: 0,
@@ -48,10 +44,8 @@ impl<const MEM_LIMIT: usize> LzCircularBuffer<MEM_LIMIT> {
         *self.buf.get(index).unwrap_or(&0)
     }
 
-    fn set(&mut self, index: usize, value: u8) -> error::Result<()> {
-        let new_len = index + 1;
+    fn set(&mut self, index: usize, value: u8) {
         self.buf[index] = value;
-        Ok(())
     }
 }
 
@@ -120,7 +114,7 @@ where
         let dict_size = self
             .dict_size
             .unwrap_or_else(|| panic!("LzCircularBuffer::dict_size is not initialized"));
-        self.set(self.cursor, lit)?;
+        self.set(self.cursor, lit);
         self.cursor += 1;
         self.len += 1;
 

@@ -8,7 +8,6 @@ use byteorder::LittleEndian;
 use core::iter::repeat;
 use core::iter::FromIterator;
 use core::marker::PhantomData;
-use heapless::Vec;
 use io::ReadBytesExt;
 
 /// Maximum input data that can be processed in one iteration.
