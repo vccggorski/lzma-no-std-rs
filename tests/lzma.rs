@@ -61,16 +61,23 @@ fn assert_round_trip_with_options(
     {
         let mut bf = std::io::BufReader::new(compressed.as_slice());
         let mut decomp: Vec<u8> = Vec::new();
-        lzma_rs::lzma_decompress_with_options(&mut bf, &mut decomp, decode_options).unwrap();
+        lzma_rs::lzma_decompress_with_options::<_, _, 4096, 8>(
+            &mut bf,
+            &mut decomp,
+            decode_options,
+        )
+        .unwrap();
         assert_eq!(decomp, x);
     }
 
     #[cfg(feature = "stream")]
     // test streaming decompression
     {
-        let mut stream = lzma_rs::decompress::Stream::new_with_options(decode_options, Vec::new());
+        let mut sink = Vec::new();
+        let mut stream =
+            lzma_rs::decompress::Stream::<_, 4096, 8>::new_with_options(decode_options);
 
-        if let Err(error) = stream.write_all(&compressed) {
+        if let Err(error) = stream.write_all(&mut sink, &compressed) {
             // A WriteZero error may occur if decompression is finished but there
             // are remaining `compressed` bytes to write.
             // This is the case when the unpacked size is encoded as unknown but
@@ -89,8 +96,8 @@ fn assert_round_trip_with_options(
             }
         }
 
-        let decomp = stream.finish().unwrap();
-        assert_eq!(decomp, x);
+        stream.finish(&mut sink).unwrap();
+        assert_eq!(sink, x);
     }
 }
 
@@ -104,12 +111,12 @@ fn assert_decomp_eq(compressed: &[u8], expected: &[u8], compare_to_liblzma: bool
     {
         let mut input = std::io::BufReader::new(compressed);
         let mut decomp: Vec<u8> = Vec::new();
-        lzma_rs::lzma_decompress(&mut input, &mut decomp).unwrap();
+        lzma_rs::lzma_decompress::<_, _, 4096, 8>(&mut input, &mut decomp).unwrap();
         assert_eq!(decomp, expected);
     }
 
-    // Test consistency with lzma crate. Sometimes that crate fails (e.g. huge dictionary), so we
-    // have a flag to slip that.
+    // Test consistency with lzma crate. Sometimes that crate fails (e.g. huge
+    // dictionary), so we have a flag to slip that.
     if compare_to_liblzma {
         let decomp = lzma::decompress(compressed).unwrap();
         assert_eq!(decomp, expected);
@@ -117,19 +124,21 @@ fn assert_decomp_eq(compressed: &[u8], expected: &[u8], compare_to_liblzma: bool
 
     #[cfg(feature = "stream")]
     {
-        let mut stream = lzma_rs::decompress::Stream::new(Vec::new());
-        stream.write_all(compressed).unwrap();
-        let decomp = stream.finish().unwrap();
-        assert_eq!(decomp, expected);
+        let mut sink = Vec::new();
+        let mut stream = lzma_rs::decompress::Stream::<_, 4096, 8>::new();
+        stream.write_all(&mut sink, compressed).unwrap();
+        stream.finish(&mut sink).unwrap();
+        assert_eq!(sink, expected);
 
         const CHUNK_SIZES: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8, 16, 32, 64, 128, 256, 512, 1024];
         for &chunk_size in CHUNK_SIZES {
-            let mut stream = lzma_rs::decompress::Stream::new(Vec::new());
+            let mut sink = Vec::new();
+            let mut stream = lzma_rs::decompress::Stream::<_, 4096, 8>::new();
             for chunk in compressed.chunks(chunk_size) {
-                stream.write_all(chunk).unwrap();
+                stream.write_all(&mut sink, chunk).unwrap();
             }
-            let decomp = stream.finish().unwrap();
-            assert_eq!(decomp, expected);
+            stream.finish(&mut sink).unwrap();
+            assert_eq!(sink, expected);
         }
     }
 }
@@ -141,7 +150,7 @@ fn decompress_short_header() {
     let _ = env_logger::try_init();
     let mut decomp: Vec<u8> = Vec::new();
     // TODO: compare io::Errors?
-    lzma_rs::lzma_decompress(&mut (b"" as &[u8]), &mut decomp).unwrap();
+    lzma_rs::lzma_decompress::<_, _, 4096, 8>(&mut (b"" as &[u8]), &mut decomp).unwrap();
 }
 
 #[test]
@@ -312,7 +321,6 @@ fn memlimit() {
     };
     let decode_options = lzma_rs::decompress::Options {
         unpacked_size: lzma_rs::decompress::UnpackedSize::ReadHeaderButUseProvided(None),
-        memlimit: Some(0),
         ..Default::default()
     };
 
@@ -328,31 +336,27 @@ fn memlimit() {
     {
         let mut bf = std::io::BufReader::new(compressed.as_slice());
         let mut decomp: Vec<u8> = Vec::new();
-        let error = lzma_rs::lzma_decompress_with_options(&mut bf, &mut decomp, &decode_options)
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("exceeded memory limit of 0"),
-            "{}",
-            error.to_string()
-        );
+        let error = lzma_rs::lzma_decompress_with_options::<_, _, 1, 0>(
+            &mut bf,
+            &mut decomp,
+            &decode_options,
+        )
+        .unwrap_err();
+
+        todo!("Assert against proper error type");
     }
 
     #[cfg(feature = "stream")]
     // test streaming decompression
     {
-        let mut stream = lzma_rs::decompress::Stream::new_with_options(&decode_options, Vec::new());
+        let mut sink = Vec::new();
+        let mut stream =
+            lzma_rs::decompress::Stream::<_, 1, 0>::new_with_options(&decode_options);
 
-        let error = stream.write_all(&compressed).unwrap_err();
-        assert!(
-            error.to_string().contains("exceeded memory limit of 0"),
-            "{}",
-            error.to_string()
-        );
-        let error = stream.finish().unwrap_err();
-        assert!(
-            error.to_string().contains("previous write error"),
-            "{}",
-            error.to_string()
-        );
+        let error = stream.write_all(&mut sink, &compressed).unwrap_err();
+        todo!("Assert against proper error type");
+
+        let error = stream.finish(&mut sink).unwrap_err();
+        todo!("Assert against proper error type");
     }
 }
