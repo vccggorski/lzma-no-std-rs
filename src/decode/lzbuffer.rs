@@ -1,3 +1,4 @@
+#![warn(unsafe_code)]
 use crate::error;
 use crate::io;
 use crate::option::GuaranteedOption as Option;
@@ -70,11 +71,7 @@ impl<const MEM_LIMIT: usize> LzBuffer for LzCircularBuffer<MEM_LIMIT> {
 
     // Retrieve the last byte or return a default
     fn last_or(&self, lit: u8) -> u8 {
-        // TODO: resolve optional dict_size in a different way
-        let dict_size = match self.dict_size {
-            Some(v) => v.clone(),
-            None => panic!("LzCircularBuffer::dict_size is not initialized"),
-        };
+        let dict_size = unsafe { self.dict_size.as_ref().unwrap_unchecked().clone() };
         if self.len == 0 {
             lit
         } else {
@@ -84,10 +81,7 @@ impl<const MEM_LIMIT: usize> LzBuffer for LzCircularBuffer<MEM_LIMIT> {
 
     // Retrieve the n-th last byte
     fn last_n(&self, distance: usize) -> error::Result<u8> {
-        let dict_size = match self.dict_size {
-            Some(v) => v.clone(),
-            None => panic!("LzCircularBuffer::dict_size is not initialized"),
-        };
+        let dict_size = unsafe { self.dict_size.as_ref().unwrap_unchecked().clone() };
         if distance > dict_size {
             return Err(
                 error::lzma::LzmaError::MatchDistanceIsBeyondDictionarySize {
@@ -111,10 +105,7 @@ impl<const MEM_LIMIT: usize> LzBuffer for LzCircularBuffer<MEM_LIMIT> {
 
     // Append a literal
     fn append_literal(&mut self, stream: &mut dyn io::Write, lit: u8) -> error::Result<()> {
-        let dict_size = match self.dict_size {
-            Some(v) => v.clone(),
-            None => panic!("LzCircularBuffer::dict_size is not initialized"),
-        };
+        let dict_size = unsafe { self.dict_size.as_ref().unwrap_unchecked().clone() };
         self.set(self.cursor, lit);
         self.cursor += 1;
         self.len += 1;
@@ -135,10 +126,7 @@ impl<const MEM_LIMIT: usize> LzBuffer for LzCircularBuffer<MEM_LIMIT> {
         len: usize,
         distance: usize,
     ) -> error::Result<()> {
-        let dict_size = match self.dict_size {
-            Some(v) => v.clone(),
-            None => panic!("LzCircularBuffer::dict_size is not initialized"),
-        };
+        let dict_size = unsafe { self.dict_size.as_ref().unwrap_unchecked().clone() };
         lzma_debug!("LZ {{ len: {}, distance: {} }}", len, distance);
         if distance > dict_size {
             return Err(error::lzma::LzmaError::LzDistanceIsBeyondDictionarySize {

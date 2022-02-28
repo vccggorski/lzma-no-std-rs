@@ -216,9 +216,6 @@ impl<const DICT_MEM_LIMIT: usize, const PROBS_MEM_LIMIT: usize>
     /// This function reads between 0 and `data.len()` of bytes. To read all the
     /// data from `data` slice, use [`Stream::write_all`] function.
     pub fn write(&mut self, output: &mut dyn Write, data: &[u8]) -> crate::error::Result<usize> {
-        if let StreamStatus::Uninitialized = self.get_stream_status() {
-            panic!("Stream is uninitialized; call `Stream::reset` first");
-        }
         let mut input = Cursor::new(data);
 
         let state = match self.state.take() {

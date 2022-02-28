@@ -1,3 +1,4 @@
+#![warn(unsafe_code)]
 use crate::decode::lzbuffer;
 use crate::decode::rangecoder;
 use crate::decompress::Options;
@@ -255,12 +256,7 @@ where
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<ProcessingStatus> {
-        let params = match &self.params {
-            Some(v) => v.clone(),
-            None => panic!(
-                "DecoderState::params is not initialized; call `DecoderState::set_params` first"
-            ),
-        };
+        let params = unsafe { self.params.as_ref().unwrap_unchecked().clone() };
         let pos_state = self.output.len() & ((1 << params.pb) - 1);
 
         // Literal
@@ -417,15 +413,7 @@ where
         mut rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         mode: ProcessingMode,
     ) -> error::Result<()> {
-        if let ProcessingStatus::Uninitialized = self.processing_status {
-            panic!("DecoderState is uninitialized; call `DecoderState::reset` first");
-        }
-        let params = match &self.params {
-            Some(v) => v.clone(),
-            None => panic!(
-                "DecoderState::params is not initialized; call `DecoderState::set_params` first"
-            ),
-        };
+        let params = unsafe { self.params.as_ref().unwrap_unchecked().clone() };
         loop {
             if let Some(unpacked_size) = params.unpacked_size {
                 if self.output.len() as u64 >= unpacked_size {
@@ -521,12 +509,7 @@ where
         rangecoder: &mut rangecoder::RangeDecoder<'a, R>,
         update: bool,
     ) -> error::Result<u8> {
-        let params = match &self.params {
-            Some(v) => v.clone(),
-            None => panic!(
-                "DecoderState::params is not initialized; call `DecoderState::set_params` first"
-            ),
-        };
+        let params = unsafe { self.params.as_ref().unwrap_unchecked().clone() };
         let def_prev_byte = 0u8;
         let prev_byte = self.output.last_or(def_prev_byte) as usize;
 

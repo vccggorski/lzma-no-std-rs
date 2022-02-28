@@ -114,6 +114,15 @@ pub mod option {
     }
 
     impl<T> GuaranteedOption<T> {
+        #[allow(unsafe_code)]
+        pub unsafe fn unwrap_unchecked(self) -> T {
+            use GuaranteedOption::*;
+            match self {
+                Some(val) => val,
+                // SAFETY: the safety contract must be upheld by the caller.
+                None => core::hint::unreachable_unchecked(),
+            }
+        }
         pub const fn as_ref(&self) -> GuaranteedOption<&T> {
             use GuaranteedOption::*;
             match self {
